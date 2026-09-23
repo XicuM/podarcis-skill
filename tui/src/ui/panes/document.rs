@@ -326,7 +326,6 @@ pub(super) fn reader(frame: &mut Frame, app: &mut App, area: Rect) {
 /// A clipped table says nothing about what it is hiding, which is the whole of
 /// the bug this exists for: the arrow says there is more, and for a CSV — whose
 /// doc is one table with known column stops — it says how many columns.
-
 pub(super) fn pan_edges(
     frame: &mut Frame,
     app: &App,
