@@ -1020,7 +1020,9 @@ impl<'a> Writer<'a> {
                     CodeBlockKind::Fenced(lang) => lang.to_string(),
                     CodeBlockKind::Indented => String::new(),
                 };
-                if lang.eq_ignore_ascii_case("mermaid") {
+                let words: Vec<&str> = lang.split_whitespace().collect();
+                let first = words.first().copied().unwrap_or("");
+                if first.eq_ignore_ascii_case("mermaid") {
                     // Collected rather than printed: a mermaid block is a
                     // picture, and it can only be drawn once the whole source
                     // is in hand.
