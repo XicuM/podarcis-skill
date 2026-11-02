@@ -6,7 +6,13 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
-uv.lock
+node_modules/
+agents.lock
+.agents/.gitignore
+.agents/mcp_config.json
+.opencode/
+.claude-plugin/
+.local/
 
 # Local vaults, credentials, and client state.
 /wiki/
@@ -16,6 +22,7 @@ uv.lock
 .podarcis/
 .env
 .env.*
+!.env.example
 *.secret
 *.secret.yaml
 credentials.json

@@ -1,16 +1,30 @@
 """Vault and PDF fixtures for the ingestion workflow."""
 
-import pytest
+import json
 
-from podarcis.tools import literature
+import pytest
 
 
 @pytest.fixture
-def root(tmp_path, monkeypatch):
+def root(tmp_path):
     vault = tmp_path / 'vault'
     (vault / 'sources').mkdir(parents=True)
-    monkeypatch.setattr(literature, 'ROOT', vault)
     return vault
+
+
+@pytest.fixture
+def metadata(tmp_path):
+    work = {
+        'id': 'https://openalex.org/W123',
+        'display_name': 'Synthetic fixture',
+        'authorships': [{'author': {'display_name': 'Test Author'}}],
+        'publication_year': 2026,
+        'doi': 'https://doi.org/10.1234/test',
+        'type': 'article',
+    }
+    path = tmp_path / 'work.json'
+    path.write_text(json.dumps(work))
+    return path
 
 
 @pytest.fixture

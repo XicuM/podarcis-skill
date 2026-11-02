@@ -4,24 +4,37 @@ build-backend = "hatchling.build"
 
 [project]
 name = "podarcis"
-version = "13.0.0"
-description = "OpenAlex search and local paper ingestion for research vaults over MCP"
+version = "0.1.0"
+description = "Portable research-vault skill with OpenAlex and PDF ingestion commands"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.10"
+license = "AGPL-3.0"
+requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.30.0,<2.0.0",
     "pyyaml>=6.0",
-    "pdfminer-six>=20231228",
+    "pymupdf>=2.0",
+    "pymupdf4llm>=2.0",
     "httpx",
+    "polite-http",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
 
 [project.scripts]
-podarcis-mcp = "podarcis.server:main"
+podarcis = "podarcis.scripts.vault:main"
+podarcis-openalex = "podarcis.scripts.openalex_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["skills/podarcis"]
 
 [tool.pytest.ini_options]
 addopts = "-p no:cacheprovider"
 testpaths = ["tests"]
+
+[dependency-groups]
+semantic-scholar = ["s2-mcp-server==1.7.12"]
+google-drive = ["workspace-mcp==2.2.1"]
+
+[tool.uv]
+# These servers require incompatible MCP SDKs and run in isolated environments.
+conflicts = [[{ group = "semantic-scholar" }, { group = "google-drive" }]]
