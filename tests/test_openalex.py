@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 
-from podarcis.scripts import openalex_cli as openalex
+import openalex_cli as openalex
 
 
 def test_search_parameters_and_environment_key(monkeypatch, capsys):

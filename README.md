@@ -1,116 +1,85 @@
 # Podarcis
 
-A portable skill and repository-based setup for literature research in a local Markdown vault. OpenAlex supplies discovery and metadata; Podarcis imports papers and tracks wiki citations. Agents use their own file tools to read and write content.
+A portable skill for literature research in a local Markdown vault. OpenAlex supplies discovery and metadata; Podarcis imports papers, tracks wiki citations, and sets up the vault for any agent harness. Agents use their own file tools to read and write content.
 
 ```text
 vault/
+├── podarcis.yaml      # Git URLs, agent targets, MCP servers
 ├── sources/<optional/domain/folders>/<source_id>/
 │   ├── source.md      # YAML metadata followed by extracted full text
 │   └── original.pdf
-├── wiki/             # Knowledge pages citing local sources
-└── workspace/        # Deliverables citing wiki pages
+├── wiki/              # Knowledge pages citing local sources
+└── workspace/         # Deliverables citing wiki pages
 ```
 
 The [skill](skills/podarcis/SKILL.md) tells agents to read metadata, abstracts, and relevant sections first, then expand their reading as needed. See the [vault contract](skills/podarcis/references/vault.md).
 
-## Reproduce the workspace
+## Set up a vault
 
-The complete setup is declared in this repository. On another machine, clone the same repository revision and run this command from its root:
+Requires git, [uv](https://docs.astral.sh/uv/), and Node.js 22+ (for `npx`). From a checkout of this repository:
 
 ```bash
-make setup
+uv run skills/podarcis/scripts/vault.py --root /path/to/vault setup
 ```
 
-Prerequisites: Git, Make, Node.js 22+, [uv](https://docs.astral.sh/uv/), and SSH access to `gitlab-internal.bsc.es:esantigo/overleaf-suggest.git`. Python 3.11+ is required by PyMuPDF 2; uv can supply Python. Playwright may also need operating-system browser libraries on a minimal Linux installation.
+The first run creates `podarcis.yaml` with defaults, empty `sources/`, `wiki/`, and `workspace/` folders, and an empty private `.env`. It copies the skill to `.agents/skills/podarcis`, so later runs can use the vault's own copy. Edit `podarcis.yaml`, or use a panel, and run setup again:
 
-Setup installs locked Python and Node dependencies, installs the declared skills with [dotagents](https://github.com/getsentry/dotagents), generates local MCP configurations, creates an empty vault layout, preserves an existing `.env` or creates it from `.env.example`, and installs Overleaf's Chromium runtime. It does not sign into external accounts or change user-wide agent settings. Re-running setup restores the declared dependencies and refreshes managed configuration. An existing conflicting Antigravity config is preserved and causes setup to fail rather than being overwritten.
+```yaml
+agents: [claude, codex, opencode, vscode]   # dotagents targets
+repos:
+  sources: git@github.com:you/podarcis-sources.git
+  wiki: git@github.com:you/podarcis-wiki.git
+  workspace: null                           # a local folder without Git
+mcp:
+  - semantic-scholar                        # from references/mcp-servers.yaml
+  - name: my-server                         # any dotagents [[mcp]] entry
+    url: https://example.org/mcp
+skills: []                                  # extra dotagents [[skills]] entries
+```
 
-| Included capability | Implementation |
-|---|---|
-| Podarcis skill and commands | This repository's `skills/podarcis/` |
-| Overleaf skill and MCP | BSC `esantigo/overleaf-suggest`, commit `21d3be3efd86f5686d289ca8df1672920a30b770` |
-| Semantic Scholar MCP | [`s2-mcp-server`](https://github.com/smaniches/semantic-scholar-mcp), 1.7.12 |
-| Google Drive MCP | [`workspace-mcp`](https://github.com/taylorwilsdon/google_workspace_mcp), 2.2.1, limited to Drive's core tools |
+Setup clones folders that are missing or empty, repoints `origin` when a URL changes, and refuses to clone into a folder that already has files. Each folder is its own repository: commit and push inside it. It then writes `agents.toml` and runs [dotagents](https://dotagents.sentry.dev/) 3.4.0, which writes each harness's configuration:
 
-The Python MCP servers require incompatible MCP SDK versions. Their dependency groups are explicitly exclusive, and each server runs in its own isolated environment using `uv.lock`. They can run concurrently without replacing each other's dependencies or the development environment. Their locked packages are downloaded on first launch if not already cached; setup does not prewarm those separate environments.
-
-Launch the chosen agent through Herdr **from this repository root**. Herdr supplies the terminal; the agent reads its normal project configuration. Other repositories do not acquire this setup automatically. To reproduce the set elsewhere, carry the repository's setup files and skill source at the same revision, rather than copying only generated agent folders. Credentials and research data are excluded from version control.
-
-## Files and ownership
-
-| File | Responsibility |
-|---|---|
-| `agents.toml` | Canonical list of skills, MCP commands, and any plugin declarations |
-| `package.json`, `package-lock.json` | Pinned dotagents release, Overleaf Git revision, and Node dependency tree |
-| `pyproject.toml`, `uv.lock` | Podarcis release version and Python dependencies, including isolated MCP groups |
-| `skills/podarcis/scripts/*.py.lock` | Dependencies of the standalone skill scripts when copied to another repository |
-| `Makefile` | The verified restore commands, exposed as `make setup` |
-| `.env` | Local credentials and runtime paths; never committed |
-
-`agents.lock` is dotagents' generated installation inventory, not a frozen dependency resolver; it is ignored. Reproducibility comes from the committed source revision, exact refs in `agents.toml`, and the Python and Node lockfiles. The Node override for Overleaf's unused Zod declaration selects patched Zod 4.6.7; its MCP SDK already uses this version.
-
-Generated agent locations:
-
-| Agent | Skills | MCP configuration |
+| Target | Skills | MCP configuration |
 |---|---|---|
-| OpenCode | `.agents/skills/` | `.opencode/opencode.jsonc` |
-| Claude Code | `.claude/skills/` | `.mcp.json` |
-| Antigravity | `.agents/skills/` | `.agents/mcp_config.json` → `../.mcp.json` |
-| Codex | `.agents/skills/` | `.codex/config.toml` |
+| `claude` | `.claude/skills` → `.agents/skills` | `.mcp.json` |
+| `codex` | `.agents/skills` | `.codex/config.toml` |
+| `opencode` | `.agents/skills` | `.opencode/opencode.jsonc` |
+| `vscode` (Copilot Chat) | `.agents/skills` | `.vscode/mcp.json` |
 
-Antigravity's [documented workspace format](https://antigravity.google/docs/mcp) accepts the same stdio entries, so a relative symlink shares the generated configuration without a second list. Its standalone `mcp list` command did not show project entries in our check; native session discovery remains unverified. Restart or refresh agents after setup and approve project trust where the client requires it. Repository scope controls discovery, not filesystem permissions or exclusion of the client's existing global configuration.
+dotagents also supports `copilot`, `cursor`, and `pi`. Harnesses outside its list, such as Gemini CLI and Antigravity, need their MCP configuration added by hand. `agents.toml` is generated; edit `podarcis.yaml` instead. If the vault root is inside another Git repository, dotagents uses that repository's root.
 
-## Add skills, MCP servers, or plugins
+### Recommended MCP servers
 
-Edit `agents.toml`, then run:
+[`references/mcp-servers.yaml`](skills/podarcis/references/mcp-servers.yaml) lists the recommended servers. Each entry is a dotagents MCP entry plus a description, setup note, and any skill it needs. To recommend another server, add an entry there.
+
+| Server | Credentials |
+|---|---|
+| `semantic-scholar` | Optional `SEMANTIC_SCHOLAR_API_KEY` in `.env` |
+| `google-drive` | `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env`; OAuth on first use |
+| `overleaf-suggest` | SSH access to `gitlab-internal.bsc.es`; one-time `login` command from its setup note |
+
+Python servers run in their own pinned environment (`uv run --no-project --with <package>==<version>`), downloaded on first launch. Overleaf runs from its pinned Git commit through `npx`. Startup was checked for Semantic Scholar (MCP `initialize`) and Overleaf (`--help`); Drive requires your OAuth client.
+
+## Panels
+
+`panels/` contains an Obsidian plugin and a VS Code extension with the same form: repository URLs and state, agent targets, and recommended servers. **Apply** saves `podarcis.yaml` and runs setup; the output appears in the panel. Custom servers and skills stay in `podarcis.yaml`. Both panels run `uv run <skill>/scripts/vault.py`, so they need a local vault (Obsidian desktop, a local or remote-workspace VS Code). Their settings hold the uv command and the skill path, which defaults to `.agents/skills/podarcis`. Before the first setup, point the skill path at this checkout's `skills/podarcis`. Apps started from a desktop launcher may not see your shell's `PATH`; set an absolute uv path if needed.
 
 ```bash
-npm run agents:sync
-npm run agents:check
+cd panels
+npm ci
+npm run build          # obsidian/main.js, vscode/dist/
+npm test
+npm run package:vscode # podarcis-vscode.vsix
 ```
 
-Declare an additional skill with `[[skills]]`; use a local tracked directory or an exact remote commit. For example, replace the placeholders below with an actual source and verified commit:
-
-```toml
-[[skills]]
-name = "skill-name"
-source = "owner/skills-repository"
-ref = "FULL_COMMIT_SHA"
-```
-
-MCP servers use `[[mcp]]` with `name`, `command` and `args`, or a remote `url`. Install their runtime through a locked dependency before registering its command. Python servers with incompatible dependencies need separate isolated groups like the existing servers. Native commands explicitly load this workspace's `.env`, avoiding differences between client-specific environment interpolation.
-
-Plugins use `[[plugins]]`, with a pinned source and explicit targets:
-
-```toml
-[[plugins]]
-name = "plugin-name"
-source = "owner/plugin-repository"
-ref = "FULL_COMMIT_SHA"
-path = "plugins/plugin-name"
-targets = ["opencode", "claude", "codex"]
-```
-
-No additional plugin is enabled by default. Plugin installation was exercised with a disposable local fixture. dotagents projects the components it supports; native OpenCode JavaScript extensions, Claude hooks, and other host-specific features do not automatically become equivalent across agents. Check the plugin's supported targets and the [dotagents reference](https://dotagents.sentry.dev/cli/) before adding it. Antigravity native-plugin installation is not managed by this setup.
-
-After changing dependencies, deliberately update `package-lock.json` or `uv.lock`, rerun setup, review the generated configuration, and commit the declarations and locks together. Setup does not update floating remote skill/plugin refs for you safely: use exact commits for a repeatable set.
-
-## Authentication
-
-Setup preserves `.env` and creates no account connections. Put only this workspace's intended settings there; use [.env.example](.env.example) as the field reference. On a fresh setup it places Drive logs/tokens, the Overleaf session, and Chromium under ignored `.local/`. An existing `.env` is left unchanged, so upstream defaults apply to any paths not configured there. Dependency download caches may remain user-wide; that is separate from installing skills or agent configuration globally.
-
-- **Semantic Scholar:** works without a key against shared access. An optional `SEMANTIC_SCHOLAR_API_KEY` gives the provider-assigned quota.
-- **Google Drive:** supply your own `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`, enable Drive API, and complete the provider's OAuth flow when using the server. See the [upstream setup](https://github.com/taylorwilsdon/google_workspace_mcp#quick-start). The setup validates MCP discovery, not access to your Drive.
-- **Overleaf:** run `npm run overleaf:login` and sign in through its browser, or supply `OVERLEAF_SESSION_COOKIE` in `.env`. Setup does not access or edit a paper.
-- **OpenAlex:** supply `OPENALEX_API_KEY` through the command's environment if needed. The standalone OpenAlex script does not automatically read `.env`; `uv run --env-file .env <script> ...` explicitly loads this workspace's file. Metadata works keyless within OpenAlex's shared budget; OpenAlex-hosted full text requires a key, while recorded publisher/repository locations may work without one. See [OpenAlex authentication](https://help.openalex.org/api/authentication/).
+- **Obsidian:** copy `panels/obsidian/{main.js,manifest.json,styles.css}` to `<vault>/.obsidian/plugins/podarcis/` and enable Podarcis. Open it from the ribbon or **Podarcis: Open setup panel**.
+- **VS Code:** `code --install-extension panels/podarcis-vscode.vsix`. The panel is in the activity bar.
 
 ## Use Podarcis
 
-The skill is self-contained. It can also be copied on its own, including scripts, adjacent lockfiles, references, and notices, into another repository's skill directory. This installs only Podarcis, not the complete workspace bundle.
-
 ```bash
-podarcis_skill=/absolute/path/to/repository/.agents/skills/podarcis
-vault_root=/absolute/path/to/vault
+podarcis_skill=/path/to/vault/.agents/skills/podarcis
+vault_root=/path/to/vault
 
 uv run "$podarcis_skill/scripts/openalex_cli.py" filter works \
   --search 'gene regulation' --per-page 5 \
@@ -123,14 +92,26 @@ The [skill](skills/podarcis/SKILL.md) contains the full search, download, and im
 
 Remote downloads require HTTPS, certificate validation, at most 50 MiB, and a new destination. Failed downloads leave no partial file. Ingestion uses PyMuPDF4LLM with OCR disabled and publishes `source.md` plus `original.pdf` only after extraction succeeds. Source IDs are unique across domains and never replaced. Layout and table recovery depend on the PDF; inspect figures in `original.pdf`. Scanned PDFs need OCR elsewhere.
 
-`status` computes cited/uncited state from wiki footnote definitions, not synthesis quality or peer review. Legacy `metadata.md`/`raw.md` sources remain listed without migration. The skill-based Podarcis starts at version 0.1.0 and replaces the earlier MCP interface; remove obsolete `podarcis-mcp` registrations when switching.
+`OPENALEX_API_KEY` is optional for metadata and required for OpenAlex-hosted full text; pass it through the command's environment (`uv run --env-file .env ...`). See [OpenAlex authentication](https://help.openalex.org/api/authentication/).
+
+`status` computes cited/uncited state from wiki footnote definitions, not synthesis quality or peer review. Legacy `metadata.md`/`raw.md` sources remain listed without migration.
 
 ## Development
 
 ```bash
-uv run --locked --extra dev pytest
+uv run --no-project --with pytest \
+  --with-requirements skills/podarcis/scripts/vault.py \
+  --with-requirements skills/podarcis/scripts/openalex_cli.py \
+  pytest -p no:cacheprovider -o pythonpath=skills/podarcis/scripts tests
+cd panels && npm ci && npm run build && npm test
 ```
 
-The package provides `podarcis` (ingest/status) and `podarcis-openalex` (OpenAlex CLI). Tests cover real PDF extraction, installed and standalone commands, selected-vault isolation, duplicate protection, legacy sources, and controlled HTTP failure paths. Workspace validation also exercised actual MCP initialization/tool listing for all three servers, without reading cloud data or authenticating accounts. This does not establish discovery or model behavior inside every supported agent.
+Panel tests run TypeScript directly and need Node.js 22.18+.
+
+Tests cover setup with real Git repositories and a recorded dotagents call, real PDF extraction, standalone commands, selected-vault isolation, duplicate protection, legacy sources, controlled HTTP failure paths, and the panels' shared form and script runner.
+
+Tests take their dependencies from the scripts' PEP 723 headers, the same declarations an installed skill uses. The version is `metadata.version` in `SKILL.md`.
+
+Version 1.0.0 replaces the 0.1.0 workspace setup (Makefile, root `agents.toml`, `pyproject.toml`, Node workspace, MCP dependency groups) and removes the installed `podarcis` and `podarcis-openalex` commands; run the scripts with `uv run`. Remove obsolete `podarcis-mcp` registrations when switching from the MCP server.
 
 See [AGENTS.md](AGENTS.md). Podarcis is [AGPL-3.0](LICENSE); the adapted Google DeepMind OpenAlex CLI retains Apache-2.0 notices in [NOTICE.md](skills/podarcis/NOTICE.md).

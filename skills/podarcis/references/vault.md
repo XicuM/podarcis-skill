@@ -2,12 +2,15 @@
 
 ```text
 vault/
+├── podarcis.yaml          # repository URLs, agent targets, MCP servers
 ├── sources/<optional/domain/folders>/<source_id>/
 │   ├── source.md
 │   └── original.pdf
 ├── wiki/
 └── workspace/
 ```
+
+`sources/`, `wiki/`, and `workspace/` are each a local folder or a separate Git repository; relative links between them work in the vault checkout, not when one repository is browsed alone.
 
 Each source ID is unique across domains. Never replace an existing source. `source.md` is the entry point: YAML metadata followed by extracted paper text. Preserve the original paper's headings, abstract, and tables where extraction supports them. Do not invent an abstract or headings to disguise missing extraction. Generated summaries and interpretations belong in the wiki.
 

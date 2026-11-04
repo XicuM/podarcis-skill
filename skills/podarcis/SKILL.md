@@ -2,6 +2,8 @@
 name: podarcis
 description: Search OpenAlex, import papers into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for literature work in a vault with sources/, wiki/, and workspace/.
 license: AGPL-3.0
+metadata:
+  version: 1.0.0
 ---
 
 # Podarcis
@@ -16,9 +18,20 @@ Do not read every source or entire papers by default. Start with metadata, the a
 
 For example, use `sed -n '1,45p' source.md` for the opening, `rg -n '^#{1,6} |abstract|limitations' source.md` to locate sections, then read the relevant line ranges. The first 45 lines are a starting point, not a guarantee that metadata or an abstract ends there. Execute the scripts without reading their implementation unless troubleshooting them.
 
+## Set up a vault
+
+A vault's `podarcis.yaml` declares a Git URL for each of `sources/`, `wiki/`, and `workspace/` (empty for a local folder), the agent targets, and its MCP servers: names from [the recommended servers](references/mcp-servers.yaml) or custom dotagents `[[mcp]]` entries. Extra dotagents skills go under `skills`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, writes `agents.toml`, copies this skill to `.agents/skills/podarcis`, and runs dotagents, which writes each agent's MCP configuration. Do not edit the generated `agents.toml`.
+
+```bash
+uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" config  # current settings, catalogue, and repository state
+uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" setup
+```
+
+Setup needs git, uv, and Node.js for `npx`. Credentials go in the vault's `.env`, which setup creates empty and private; recommended servers read it. Each folder is its own Git repository: commit and push inside it, never in the vault root. Change only the settings the user asked for, and report each server's setup note.
+
 ## Commands
 
-Resolve `podarcis_skill` to this skill's actual installed directory; script paths are relative to this `SKILL.md`, not the vault or current directory. Set `vault_root` to the selected vault. It must already contain `sources/`; create that directory for a new vault.
+Resolve `podarcis_skill` to this skill's actual installed directory; script paths are relative to this `SKILL.md`, not the vault or current directory. Set `vault_root` to the selected vault. It must already contain `sources/`; run `setup` for a new vault.
 
 ```bash
 podarcis_skill=/absolute/path/to/installed/podarcis

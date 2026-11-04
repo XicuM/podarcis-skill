@@ -1,0 +1,9 @@
+.podarcis-panel h4 { margin: 1em 0 0.4em; }
+.podarcis-panel input[type='text'] { width: 100%; }
+.podarcis-repo { display: flex; flex-direction: column; gap: 2px; margin-bottom: 0.6em; }
+.podarcis-name { font-weight: 600; }
+.podarcis-muted { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.podarcis-setup { margin-bottom: 0.6em; }
+.podarcis-check { display: flex; align-items: center; gap: 6px; }
+.podarcis-message { white-space: pre-wrap; font-size: var(--font-ui-smaller); max-height: 12em; overflow: auto; }
+.podarcis-buttons { display: flex; gap: 8px; margin-top: 1em; }

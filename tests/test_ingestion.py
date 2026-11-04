@@ -6,7 +6,7 @@ import pymupdf4llm
 import pytest
 import yaml
 
-from podarcis.scripts import vault
+import vault
 
 
 def test_real_pdf_ingestion_citation_and_duplicate_guard(root, pdf, metadata):

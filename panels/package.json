@@ -1,0 +1,23 @@
+{
+  "name": "podarcis-panels",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc && node build.mjs",
+    "test": "node --test test/",
+    "package:vscode": "cd vscode && vsce package --no-dependencies --allow-missing-repository --skip-license -o ../podarcis-vscode.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "4.1.0",
+    "esbuild": "0.28.2",
+    "obsidian": "1.14.4",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,13 @@
+body { color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); padding: 0 12px 12px; }
+h4 { margin: 1em 0 0.4em; }
+input[type='text'] { width: 100%; box-sizing: border-box; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); padding: 3px 4px; }
+button { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: none; padding: 4px 12px; cursor: pointer; }
+button:hover { background: var(--vscode-button-hoverBackground); }
+button:disabled { opacity: 0.6; cursor: default; }
+.podarcis-repo { display: flex; flex-direction: column; gap: 2px; margin-bottom: 0.6em; }
+.podarcis-name { font-weight: 600; }
+.podarcis-muted { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.podarcis-setup { margin-bottom: 0.6em; }
+.podarcis-check { display: flex; align-items: center; gap: 6px; }
+.podarcis-message { white-space: pre-wrap; font-size: 0.9em; max-height: 12em; overflow: auto; }
+.podarcis-buttons { display: flex; gap: 8px; margin-top: 1em; }

@@ -1,0 +1,29 @@
+# Recommended MCP servers. Enable one by adding its name to `mcp` in a vault's
+# podarcis.yaml, then run setup. `mcp` holds dotagents [[mcp]] fields without
+# `name`; `skills` holds dotagents [[skills]] entries installed with the server.
+# Commands run from the vault root, so `.env` is the vault's credentials file.
+
+semantic-scholar:
+  description: Semantic Scholar search, full-text snippets, recommendations, and BibTeX.
+  setup: Works keyless on shared access. Optionally set SEMANTIC_SCHOLAR_API_KEY in .env.
+  mcp:
+    command: uv
+    args: [run, --env-file, .env, --no-project, --with, s2-mcp-server==1.7.12, s2-mcp-server]
+
+google-drive:
+  description: Google Drive search and file access (core Drive tools only).
+  setup: Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env from a Google Cloud project with the Drive API enabled; the first tool call starts the OAuth flow.
+  mcp:
+    command: uv
+    args: [run, --env-file, .env, --no-project, --with, workspace-mcp==2.2.1, workspace-mcp, --transport, stdio, --tools, drive, --tool-tier, core]
+
+overleaf-suggest:
+  description: Propose Overleaf edits as tracked suggestions and comments; read files and fetch PDFs.
+  setup: Needs Node.js 22+ and SSH access to gitlab-internal.bsc.es. Sign in once with `npx --yes git+ssh://git@gitlab-internal.bsc.es/esantigo/overleaf-suggest.git#21d3be3efd86f5686d289ca8df1672920a30b770 login`.
+  mcp:
+    command: npx
+    args: [--yes, 'git+ssh://git@gitlab-internal.bsc.es/esantigo/overleaf-suggest.git#21d3be3efd86f5686d289ca8df1672920a30b770', serve]
+  skills:
+    - name: overleaf-suggest
+      source: git:git@gitlab-internal.bsc.es:esantigo/overleaf-suggest.git
+      ref: 21d3be3efd86f5686d289ca8df1672920a30b770

@@ -1,36 +1,34 @@
 __pycache__/
 *.pyc
 .venv/
-*.egg-info/
 .pytest_cache/
-.ruff_cache/
 build/
 dist/
 node_modules/
-agents.lock
-.agents/.gitignore
-.agents/mcp_config.json
-.opencode/
-.claude-plugin/
-.local/
+panels/obsidian/main.js
+*.vsix
 
-# Local vaults, credentials, and client state.
+# Agent, editor, and vault state from using this checkout as a working folder.
+.agents/
+.claude/
+.codex/
+.opencode/
+.vscode/
+.obsidian/
+.mcp.json
+agents.lock
+agents.toml
+podarcis.yaml
+.local/
+/sources/
 /wiki/
 /workspace/
-/sources/
-/tmp/
-.podarcis/
+
+# Credentials.
 .env
 .env.*
-!.env.example
 *.secret
 *.secret.yaml
 credentials.json
 token.json
 service_account.json
-.mcp.json
-.aws/
-.codex/
-.claude/
-.obsidian/
-.vscode/
