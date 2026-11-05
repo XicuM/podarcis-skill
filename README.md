@@ -37,7 +37,7 @@ mcp:
 skills: []                                  # extra skills: name, source (owner/repo or git:<url>), ref, path
 ```
 
-Setup clones missing or empty folders (each is its own repository), installs the skills, and writes each agent's MCP servers to `.mcp.json`, `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`, keeping their other settings. To upgrade, run the `setup` command above with a newer release tag, or press **Update** in a sidebar. From 2.1.0, setup moves a root `podarcis.yaml` and `.env` into `.agents/`. Vaults set up with 1.x no longer use `agents.toml` and `agents.lock`; delete them.
+Setup clones missing or empty folders (each is its own repository), installs the skills, and writes each agent's MCP servers to `.mcp.json`, `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`, keeping their other settings. Agents pull each repository before changing vault content and commit and push their own changes afterwards, `sources/` first so wiki citations resolve. To upgrade, run the `setup` command above with a newer release tag, or press **Update** in a sidebar. From 2.1.0, setup moves a root `podarcis.yaml` and `.env` into `.agents/`. Vaults set up with 1.x no longer use `agents.toml` and `agents.lock`; delete them.
 
 [Recommended MCP servers](skills/podarcis/references/mcp-servers.yaml) and their credentials, kept in `.agents/.env`:
 

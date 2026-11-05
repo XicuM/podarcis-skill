@@ -10,7 +10,7 @@ metadata:
 
 Requires shell and file tools, uv, Python 3.11+, and network access for OpenAlex. Local vault operations work offline after dependency installation. Keep each script's adjacent lockfile with the installed skill to reproduce its dependencies.
 
-Knowledge flows **sources → wiki → workspace**. Use your file tools to read and write Markdown; use the bundled commands for OpenAlex access and source ingestion. Read [the vault contract](references/vault.md) when creating or updating vault content.
+Knowledge flows **sources → wiki → workspace**. Use your file tools to read and write Markdown; use the bundled commands for OpenAlex access and source ingestion. Read [the vault contract](references/vault.md) when creating or updating vault content. Before and after changing vault content, [sync the vault](#sync-the-vault).
 
 ## Read selectively
 
@@ -27,7 +27,15 @@ uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" config  # curr
 uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" setup
 ```
 
-Setup needs uv, and git when a folder has a URL or an extra skill is declared. Credentials go in the vault's `.agents/.env`, which setup creates empty and private; recommended servers read the names listed under their `env`. `config` reports only which credentials are set; never read or print `.agents/.env`. Each folder is its own Git repository: commit and push inside it, never in the vault root. Change only the settings the user asked for, and report each server's setup note.
+Setup needs uv, and git when a folder has a URL or an extra skill is declared. Credentials go in the vault's `.agents/.env`, which setup creates empty and private; recommended servers read the names listed under their `env`. `config` reports only which credentials are set; never read or print `.agents/.env`. Change only the settings the user asked for, and report each server's setup note.
+
+## Sync the vault
+
+`config` reports each of `sources/`, `wiki/`, and `workspace/` as a local folder or a clone with its `origin`. Each clone is its own repository: run git inside it with `git -C "$vault_root/<folder>"`, never in the vault root. Local folders are not synced.
+
+Before reading or changing a clone's content for a request, run `git status --porcelain` in it. Uncommitted changes there belong to the user: never commit, stash, or discard them, and ask before pulling that folder. Otherwise run `git pull --rebase`. If a pull fails, run `git rebase --abort` when a rebase is in progress, report the error, and change nothing in that folder until the user decides.
+
+When the request is done, commit and push each clone you changed, in the order `sources/`, `wiki/`, `workspace/`, so every citation reaches the remote before the page that cites it. In each, `git add` only the paths you created or changed, commit them in one commit with a short summary such as `Add smith_2024_gene_regulation`, then run `git pull --rebase` and `git push`. If a rebase conflicts, abort it; if it or the push fails, report the error and push nothing that depends on that folder. Report each commit and push in your answer.
 
 ## Commands
 
