@@ -1,6 +1,6 @@
 # Recommended MCP servers. Enable one by adding its name to `mcp` in a vault's
-# podarcis.yaml, then run setup. `mcp` holds dotagents [[mcp]] fields without
-# `name`; `skills` holds dotagents [[skills]] entries installed with the server.
+# podarcis.yaml, then run setup. `mcp` holds the server's command and args, or
+# url and headers; `skills` holds skills installed with the server.
 # Commands run from the vault root, so `.env` is the vault's credentials file.
 
 semantic-scholar:

@@ -3,7 +3,7 @@ name: podarcis
 description: Search OpenAlex, import papers into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for literature work in a vault with sources/, wiki/, and workspace/.
 license: AGPL-3.0
 metadata:
-  version: 1.1.0
+  version: 2.0.0
 ---
 
 # Podarcis
@@ -20,14 +20,14 @@ For example, use `sed -n '1,45p' source.md` for the opening, `rg -n '^#{1,6} |ab
 
 ## Set up a vault
 
-A vault's `podarcis.yaml` declares a Git URL for each of `sources/`, `wiki/`, and `workspace/` (empty for a local folder), the agent targets, and its MCP servers: names from [the recommended servers](references/mcp-servers.yaml) or custom dotagents `[[mcp]]` entries. Extra dotagents skills go under `skills`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, writes `agents.toml` with this skill pinned to its release tag on GitHub, and runs dotagents, which installs the skill in `.agents/skills/podarcis` and writes each agent's MCP configuration. Do not edit the generated `agents.toml`.
+A vault's `podarcis.yaml` declares a Git URL for each of `sources/`, `wiki/`, and `workspace/` (empty for a local folder), the agents to configure (`claude`, `codex`, `opencode`, `vscode`), and its MCP servers: names from [the recommended servers](references/mcp-servers.yaml) or custom entries with `name` plus `command` and `args`, or `url` and `headers`. Extra skills go under `skills` as `name`, `source` (`owner/repo` on GitHub or `git:<url>`), and optional `ref` and `path`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, installs this skill in `.agents/skills/podarcis` and the extra skills beside it, and writes each selected agent's MCP servers: `.mcp.json` (with skill links in `.claude/skills`), `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`. It replaces only the server lists in those files, so declare every server in `podarcis.yaml`.
 
 ```bash
-uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" config  # current settings, catalogue, and repository state
-uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" setup
+uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" config  # current settings, catalogue, and repository state
+uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" setup
 ```
 
-Setup needs git, uv, and Node.js for `npx`. Credentials go in the vault's `.env`, which setup creates empty and private; recommended servers read it. Each folder is its own Git repository: commit and push inside it, never in the vault root. Change only the settings the user asked for, and report each server's setup note.
+Setup needs uv, and git when a folder has a URL or an extra skill is declared. Credentials go in the vault's `.env`, which setup creates empty and private; recommended servers read it. Each folder is its own Git repository: commit and push inside it, never in the vault root. Change only the settings the user asked for, and report each server's setup note.
 
 ## Commands
 
@@ -41,7 +41,7 @@ uv run "$podarcis_skill/scripts/openalex_cli.py" filter works \
   --search 'research question' --per-page 5 \
   --select id,display_name,publication_year,doi,type,best_oa_location
 
-uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" status --status uncited
+uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" status --status uncited
 ```
 
 For an identified paper, use its actual OpenAlex W-number returned by search. Download metadata and PDF to a fresh temporary directory, then import them:
@@ -51,7 +51,7 @@ paper_tmp=$(mktemp -d)
 work_id=W2741809807 # Example only; replace with the selected work's ID.
 uv run "$podarcis_skill/scripts/openalex_cli.py" get works "$work_id" > "$paper_tmp/work.json"
 uv run "$podarcis_skill/scripts/openalex_cli.py" download-pdf "$work_id" "$paper_tmp/paper.pdf"
-uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" \
+uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" \
   ingest "$paper_tmp/work.json" author_year_topic biology/genetics \
   --pdf-path "$paper_tmp/paper.pdf"
 ```

@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml>=6.0", "pymupdf>=2.0", "pymupdf4llm>=2.0"]
 # ///
-"""Set up a vault, import papers into it, and report wiki citation status."""
+"""Install Podarcis in a vault, set the vault up, import papers, and report wiki citation status."""
 
 import argparse
 import contextlib
@@ -11,17 +11,18 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import urllib.request
 from pathlib import Path
 
 import yaml
 
+VERSION = '2.0.0'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
+ARCHIVE = f'https://github.com/XicuM/podarcis-skill/archive/refs/tags/v{VERSION}.tar.gz'
 SKILL = Path(__file__).resolve().parents[1]
 REPOS = ('sources', 'wiki', 'workspace')
 AGENTS = ['claude', 'codex', 'opencode', 'vscode']
-DOTAGENTS = ['npx', '--yes', '@sentry/dotagents@3.4.0', '--project', 'install']
-VERSION = yaml.safe_load((SKILL / 'SKILL.md').read_text(encoding='utf-8').split('---')[1])['metadata']['version']
-PODARCIS = {'name': 'podarcis', 'source': 'XicuM/podarcis-skill', 'ref': f'v{VERSION}', 'path': 'skills/podarcis'}
 
 
 def ingest(
@@ -141,8 +142,8 @@ def check_config(config: object) -> dict:
     repos = config.get('repos') or {}
     mcp = config.get('mcp') or []
     skills = config.get('skills') or []
-    if not isinstance(agents, list) or not all(isinstance(a, str) for a in agents):
-        raise ValueError('agents must be a list of dotagents target names.')
+    if not isinstance(agents, list) or not set(agents) <= set(AGENTS) or len(set(agents)) != len(agents):
+        raise ValueError(f'agents takes only {", ".join(AGENTS)}.')
     if not isinstance(repos, dict) or set(repos) - set(REPOS):
         raise ValueError(f'repos takes only {", ".join(REPOS)}.')
     repos = {name: repos.get(name) or None for name in REPOS}
@@ -157,11 +158,21 @@ def check_config(config: object) -> dict:
     unknown = [m for m in mcp if isinstance(m, str) and m not in catalogue]
     if unknown:
         raise ValueError(f'Not a recommended MCP server: {", ".join(unknown)}.')
+    for m in mcp:
+        if isinstance(m, dict) and not (
+            set(m) <= {'name', 'command', 'args', 'url', 'headers'}
+            and bool(m.get('command')) != bool(m.get('url'))
+            and isinstance(m.get('args', []), list) and isinstance(m.get('headers', {}), dict)
+        ):
+            raise ValueError(f'MCP server {m["name"]} needs either command and args, or url and headers.')
     if not isinstance(skills, list) or not all(
-        isinstance(s, dict) and s.get('name') not in (None, 'podarcis') and s.get('source')
+        isinstance(s, dict) and set(s) <= {'name', 'source', 'ref', 'path'}
+        and re.fullmatch(r'[a-z0-9][a-z0-9._-]*', str(s.get('name'))) and s['name'] != 'podarcis'
+        and re.fullmatch(r'git:[^-].*|[\w.-]+/[\w.-]+', str(s.get('source')))
         for s in skills
     ):
-        raise ValueError('skills entries need a name other than podarcis and a source.')
+        raise ValueError('skills entries need a name other than podarcis, a source (owner/repo or git:<url>), '
+                         'and optionally ref and path.')
     return {'agents': agents, 'repos': repos, 'mcp': mcp, 'skills': skills}
 
 
@@ -196,25 +207,114 @@ def config_state(root: Path) -> dict:
     }
 
 
-def toml_key(key: object) -> str:
-    return key if re.fullmatch(r'[A-Za-z0-9_-]+', str(key)) else json.dumps(str(key))
-
-
 def toml(value: object) -> str:
-    """Write the TOML values that dotagents entries use; JSON strings are TOML strings."""
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, (str, int)):
-        return json.dumps(value)
+    """Write a TOML value; JSON strings are TOML strings."""
     if isinstance(value, list):
         return '[' + ', '.join(toml(v) for v in value) + ']'
     if isinstance(value, dict):
-        return '{ ' + ', '.join(f'{toml_key(k)} = {toml(v)}' for k, v in value.items()) + ' }'
-    raise ValueError(f'Unsupported agents.toml value: {value!r}.')
+        return '{ ' + ', '.join(f'{json.dumps(str(k))} = {toml(v)}' for k, v in value.items()) + ' }'
+    return json.dumps(value)
+
+
+def install(root: Path) -> Path:
+    """Put this skill in the vault: copy it, or download its release when the script runs alone."""
+    target = root / '.agents' / 'skills' / 'podarcis'
+    staged = target.with_name('.podarcis_staging')
+    shutil.rmtree(staged, ignore_errors=True)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    if (SKILL / 'SKILL.md').is_file():
+        shutil.copytree(SKILL, staged, ignore=shutil.ignore_patterns('__pycache__'))
+    else:
+        with tempfile.TemporaryDirectory() as tmp:
+            with urllib.request.urlopen(ARCHIVE, timeout=60) as response, tarfile.open(fileobj=response, mode='r|gz') as tar:
+                tar.extractall(tmp, filter='data')
+            found = list(Path(tmp).glob('*/skills/podarcis/SKILL.md'))
+            if len(found) != 1:
+                raise RuntimeError(f'{ARCHIVE} does not contain skills/podarcis.')
+            shutil.copytree(found[0].parent, staged)
+    shutil.rmtree(target, ignore_errors=True)
+    staged.rename(target)
+    return target
+
+
+def fetch_skill(root: Path, skill: dict) -> str:
+    """Install a skill from a Git repository at its ref, unless that ref is already installed."""
+    target = root / '.agents' / 'skills' / skill['name']
+    source, ref = skill['source'], skill.get('ref', 'HEAD')
+    pin = f'{source}@{ref}:{skill.get("path", "")}\n'
+    marker = target / '.podarcis-source'
+    if marker.is_file() and marker.read_text(encoding='utf-8') == pin:
+        return 'unchanged'
+    url = source[4:] if source.startswith('git:') else f'https://github.com/{source}.git'
+    with tempfile.TemporaryDirectory() as tmp:
+        for args in (('init', '-q', tmp), ('-C', tmp, 'fetch', '-q', '--depth', '1', '--', url, ref),
+                     ('-C', tmp, 'checkout', '-q', 'FETCH_HEAD')):
+            result = git(*args)
+            if result.returncode:
+                raise RuntimeError(f'Fetching skill {skill["name"]} failed: {result.stderr.strip()}')
+        folder = Path(tmp, skill.get('path', '')).resolve()
+        if not folder.is_relative_to(Path(tmp).resolve()) or not (folder / 'SKILL.md').is_file():
+            raise RuntimeError(f'Skill {skill["name"]} has no SKILL.md at {skill.get("path", "the repository root")}.')
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(folder, target, ignore=shutil.ignore_patterns('.git'))
+    marker.write_text(pin, encoding='utf-8')
+    return 'installed'
+
+
+def write_agents(root: Path, agents: list[str], servers: list[dict], skills: list[str]) -> None:
+    """Write each selected agent's MCP servers, keeping its other settings, and link skills for Claude."""
+    def stdio(m: dict) -> bool:
+        return 'command' in m
+
+    formats = {
+        'claude': ('.mcp.json', 'mcpServers', lambda m: {'command': m['command'], 'args': m.get('args', [])}
+                   if stdio(m) else {'type': 'http', 'url': m['url'], 'headers': m.get('headers', {})}),
+        'vscode': ('.vscode/mcp.json', 'servers', lambda m: {'type': 'stdio', 'command': m['command'],
+                   'args': m.get('args', [])} if stdio(m) else {'type': 'http', 'url': m['url'],
+                   'headers': m.get('headers', {})}),
+        'opencode': ('.opencode/opencode.jsonc', 'mcp', lambda m: {'type': 'local', 'command': [m['command'],
+                     *m.get('args', [])]} if stdio(m) else {'type': 'remote', 'url': m['url'],
+                     'headers': m.get('headers', {})}),
+    }
+    for agent in agents:
+        if agent == 'codex':
+            # Replace only the [mcp_servers.*] tables; the rest of config.toml is the user's.
+            path = root / '.codex' / 'config.toml'
+            kept, ours = [], False
+            for line in path.read_text(encoding='utf-8').splitlines() if path.exists() else []:
+                header = re.match(r'\s*\[\[?\s*([^\]]+?)\s*\]', line)
+                if header:
+                    ours = re.match(r'"?mcp_servers"?(\.|$)', header.group(1)) is not None
+                if not ours:
+                    kept.append(line)
+            text = '\n'.join(kept).strip()
+            for m in servers:
+                text += f'\n\n[mcp_servers.{json.dumps(m["name"])}]\n'
+                text += (f'command = {toml(m["command"])}\nargs = {toml(m.get("args", []))}\n' if stdio(m)
+                         else f'url = {toml(m["url"])}\nhttp_headers = {toml(m.get("headers", {}))}\n')
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(text.strip() + '\n', encoding='utf-8')
+            continue
+        name, key, entry = formats[agent]
+        path = root / name
+        try:
+            data = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+        except json.JSONDecodeError as error:
+            raise ValueError(f'{name} is not plain JSON ({error}); fix or remove it, then run setup again.')
+        data[key] = {m['name']: entry(m) for m in servers}
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    if 'claude' in agents:
+        # Claude Code reads skills only from .claude/skills; the others read .agents/skills.
+        (root / '.claude' / 'skills').mkdir(parents=True, exist_ok=True)
+        for skill in skills:
+            link = root / '.claude' / 'skills' / skill
+            if not link.exists() and not link.is_symlink():
+                link.symlink_to(Path('..', '..', '.agents', 'skills', skill))
 
 
 def setup(root: Path, config: dict | None = None) -> dict:
-    """Clone or link the vault folders, write agents.toml, and install with dotagents."""
+    """Clone or link the vault folders, install the skills, and configure each agent's MCP servers."""
     if config is not None or not (root / 'podarcis.yaml').exists():
         config = check_config(config or {})
         (root / 'podarcis.yaml').write_text(
@@ -239,28 +339,20 @@ def setup(root: Path, config: dict | None = None) -> dict:
             result, actions[name] = None, 'unchanged'
         if result and result.returncode:
             raise RuntimeError(f'git failed for {name}/: {result.stderr.strip()}')
-    mcp, skills = [], [PODARCIS, *config['skills']]
+    if (root / '.agents' / 'skills' / 'podarcis').resolve() != SKILL:
+        install(root)
+        actions['podarcis'] = f'installed {VERSION}'
+    servers, skills = [], list(config['skills'])
     for item in config['mcp']:
         if isinstance(item, str):
-            mcp.append({'name': item, **catalogue[item]['mcp']})
+            servers.append({'name': item, **catalogue[item]['mcp']})
             skills += catalogue[item].get('skills', [])
         else:
-            mcp.append(item)
-    tables = [('skills', s) for s in skills] + [('mcp', m) for m in mcp]
-    (root / 'agents.toml').write_text(
-        '# Generated by Podarcis setup from podarcis.yaml; edit that file instead.\n'
-        f'version = 1\nagents = {toml(config["agents"])}\n'
-        + ''.join(
-            f'\n[[{kind}]]\n' + ''.join(f'{toml_key(k)} = {toml(v)}\n' for k, v in entry.items())
-            for kind, entry in tables
-        ),
-        encoding='utf-8',
-    )
+            servers.append(item)
+    for skill in skills:
+        actions[skill['name']] = fetch_skill(root, skill)
+    write_agents(root, config['agents'], servers, ['podarcis', *(s['name'] for s in skills)])
     (root / '.env').touch(mode=0o600)
-    result = subprocess.run(DOTAGENTS, cwd=root, capture_output=True, text=True)
-    sys.stderr.write(result.stdout + result.stderr)
-    if result.returncode:
-        raise RuntimeError(f'dotagents install failed: {result.stderr.strip()}')
     return {**config_state(root), 'actions': actions}
 
 
@@ -285,7 +377,11 @@ def main() -> None:
         parser.error(f'No vault directory at {root}.')
     if args.command in ('ingest', 'status') and not (root / 'sources').is_dir():
         parser.error(f'No sources/ directory in {root}; run setup first.')
+    global SKILL
     try:
+        if args.command in ('config', 'setup') and not (SKILL / 'SKILL.md').is_file():
+            # Run from a URL: install this release in the vault and use its catalogue.
+            SKILL = install(root)
         if args.command == 'config':
             result = config_state(root)
         elif args.command == 'setup':
