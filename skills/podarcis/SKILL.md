@@ -3,7 +3,7 @@ name: podarcis
 description: Search OpenAlex, import papers into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for literature work in a vault with sources/, wiki/, and workspace/.
 license: AGPL-3.0
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # Podarcis
@@ -20,7 +20,7 @@ For example, use `sed -n '1,45p' source.md` for the opening, `rg -n '^#{1,6} |ab
 
 ## Set up a vault
 
-A vault's `podarcis.yaml` declares a Git URL for each of `sources/`, `wiki/`, and `workspace/` (empty for a local folder), the agent targets, and its MCP servers: names from [the recommended servers](references/mcp-servers.yaml) or custom dotagents `[[mcp]]` entries. Extra dotagents skills go under `skills`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, writes `agents.toml`, copies this skill to `.agents/skills/podarcis`, and runs dotagents, which writes each agent's MCP configuration. Do not edit the generated `agents.toml`.
+A vault's `podarcis.yaml` declares a Git URL for each of `sources/`, `wiki/`, and `workspace/` (empty for a local folder), the agent targets, and its MCP servers: names from [the recommended servers](references/mcp-servers.yaml) or custom dotagents `[[mcp]]` entries. Extra dotagents skills go under `skills`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, writes `agents.toml` with this skill pinned to its release tag on GitHub, and runs dotagents, which installs the skill in `.agents/skills/podarcis` and writes each agent's MCP configuration. Do not edit the generated `agents.toml`.
 
 ```bash
 uv run "$podarcis_skill/scripts/vault.py" --root "$vault_root" config  # current settings, catalogue, and repository state

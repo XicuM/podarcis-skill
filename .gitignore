@@ -4,25 +4,6 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
-node_modules/
-panels/obsidian/main.js
-*.vsix
-
-# Agent, editor, and vault state from using this checkout as a working folder.
-.agents/
-.claude/
-.codex/
-.opencode/
-.vscode/
-.obsidian/
-.mcp.json
-agents.lock
-agents.toml
-podarcis.yaml
-.local/
-/sources/
-/wiki/
-/workspace/
 
 # Credentials.
 .env

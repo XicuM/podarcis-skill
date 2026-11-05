@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -61,19 +62,22 @@ def test_setup_clones_links_and_generates_dotagents_config(tmp_path, npx):
     assert state['repos']['sources']['state'] == 'local'
     assert yaml.safe_load((root / 'podarcis.yaml').read_text())['repos']['wiki'] == wiki
     assert (root / '.env').stat().st_mode & 0o777 == 0o600
-    assert (root / '.agents/skills/podarcis/SKILL.md').is_file()
     call = json.loads(npx.read_text())
     assert call['args'] == ['--yes', '@sentry/dotagents@3.4.0', '--project', 'install']
     assert call['cwd'] == str(root)
 
     generated = tomllib.loads(call['toml'])
     assert generated['agents'] == ['claude', 'codex', 'opencode', 'vscode']
-    assert generated['skills'] == [{'name': 'extra', 'source': 'owner/repo', 'ref': 'abc'}]
+    assert generated['skills'] == [
+        {'name': 'podarcis', 'source': 'XicuM/podarcis-skill', 'ref': f'v{vault.VERSION}', 'path': 'skills/podarcis'},
+        {'name': 'extra', 'source': 'owner/repo', 'ref': 'abc'},
+    ]
     assert [m['name'] for m in generated['mcp']] == ['semantic-scholar', 'custom']
     assert generated['mcp'][0]['args'][-1] == 's2-mcp-server'
     assert generated['mcp'][1]['headers'] == {'X-Key': 'value'}
 
-    # Changing a URL repoints the existing clone; the installed copy can rerun setup.
+    # Changing a URL repoints the existing clone; an installed copy can rerun setup.
+    shutil.copytree(vault.SKILL, root / '.agents/skills/podarcis')
     moved = bare_repo(tmp_path / 'moved.git')
     (root / 'podarcis.yaml').write_text(f'repos:\n  wiki: {moved}\n')
     rerun = subprocess.run(

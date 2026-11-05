@@ -20,6 +20,8 @@ SKILL = Path(__file__).resolve().parents[1]
 REPOS = ('sources', 'wiki', 'workspace')
 AGENTS = ['claude', 'codex', 'opencode', 'vscode']
 DOTAGENTS = ['npx', '--yes', '@sentry/dotagents@3.4.0', '--project', 'install']
+VERSION = yaml.safe_load((SKILL / 'SKILL.md').read_text(encoding='utf-8').split('---')[1])['metadata']['version']
+PODARCIS = {'name': 'podarcis', 'source': 'XicuM/podarcis-skill', 'ref': f'v{VERSION}', 'path': 'skills/podarcis'}
 
 
 def ingest(
@@ -237,7 +239,7 @@ def setup(root: Path, config: dict | None = None) -> dict:
             result, actions[name] = None, 'unchanged'
         if result and result.returncode:
             raise RuntimeError(f'git failed for {name}/: {result.stderr.strip()}')
-    mcp, skills = [], list(config['skills'])
+    mcp, skills = [], [PODARCIS, *config['skills']]
     for item in config['mcp']:
         if isinstance(item, str):
             mcp.append({'name': item, **catalogue[item]['mcp']})
@@ -255,14 +257,6 @@ def setup(root: Path, config: dict | None = None) -> dict:
         encoding='utf-8',
     )
     (root / '.env').touch(mode=0o600)
-    installed = root / '.agents' / 'skills' / 'podarcis'
-    if installed.resolve() != SKILL:
-        # dotagents only installs local skills from inside the vault, so copy this one in.
-        staged = installed.with_name('.podarcis_staging')
-        shutil.rmtree(staged, ignore_errors=True)
-        shutil.copytree(SKILL, staged, ignore=shutil.ignore_patterns('__pycache__'))
-        shutil.rmtree(installed, ignore_errors=True)
-        staged.rename(installed)
     result = subprocess.run(DOTAGENTS, cwd=root, capture_output=True, text=True)
     sys.stderr.write(result.stdout + result.stderr)
     if result.returncode:

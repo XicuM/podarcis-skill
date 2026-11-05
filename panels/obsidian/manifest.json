@@ -1,9 +1,0 @@
-{
-  "id": "podarcis",
-  "name": "Podarcis",
-  "version": "1.0.0",
-  "minAppVersion": "1.7.2",
-  "description": "Set up a Podarcis research vault: Git repositories for sources, wiki, and workspace, agent targets, and recommended MCP servers.",
-  "author": "XicuM",
-  "isDesktopOnly": true
-}
