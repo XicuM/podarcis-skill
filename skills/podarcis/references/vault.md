@@ -2,7 +2,10 @@
 
 ```text
 vault/
-├── podarcis.yaml          # repository URLs, agent targets, MCP servers
+├── .agents/
+│   ├── podarcis.yaml      # repository URLs, agent targets, MCP servers, extra skills
+│   ├── .env               # credentials, private
+│   └── skills/
 ├── sources/<optional/domain/folders>/<source_id>/
 │   ├── source.md
 │   └── original.pdf

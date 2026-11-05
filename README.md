@@ -4,7 +4,7 @@ A portable skill for literature research in a local Markdown vault. OpenAlex sup
 
 ```text
 vault/
-├── podarcis.yaml      # Git URLs, agent targets, MCP servers
+├── .agents/           # podarcis.yaml (settings), .env (credentials), installed skills
 ├── sources/<optional/domain/folders>/<source_id>/
 │   ├── source.md      # YAML metadata followed by extracted full text
 │   └── original.pdf
@@ -19,10 +19,10 @@ Agents follow the [skill](skills/podarcis/SKILL.md) and the [vault contract](ski
 Requires [uv](https://docs.astral.sh/uv/), plus git to sync folders with Git repositories. In the vault folder:
 
 ```bash
-uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.0.0/skills/podarcis/scripts/podarcis.py setup
+uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.1.0/skills/podarcis/scripts/podarcis.py setup
 ```
 
-This installs the skill in `.agents/skills/podarcis` and creates `podarcis.yaml`, the vault folders, and an empty `.env`. Edit `podarcis.yaml` (or use a sidebar) and run setup again with `uv run .agents/skills/podarcis/scripts/podarcis.py setup`:
+This installs the skill in `.agents/skills/podarcis` and creates `.agents/podarcis.yaml`, the vault folders, and an empty `.agents/.env`. Use a [sidebar](#sidebars), or edit `.agents/podarcis.yaml` and run setup again with `uv run .agents/skills/podarcis/scripts/podarcis.py setup`:
 
 ```yaml
 agents: [claude, codex, opencode, vscode]   # agents to configure
@@ -37,19 +37,19 @@ mcp:
 skills: []                                  # extra skills: name, source (owner/repo or git:<url>), ref, path
 ```
 
-Setup clones missing or empty folders (each is its own repository), installs the skills, and writes each agent's MCP servers to `.mcp.json`, `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`, keeping their other settings. To upgrade, run the `setup` command above with a newer release tag. Vaults set up with 1.x no longer use `agents.toml` and `agents.lock`; delete them.
+Setup clones missing or empty folders (each is its own repository), installs the skills, and writes each agent's MCP servers to `.mcp.json`, `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`, keeping their other settings. To upgrade, run the `setup` command above with a newer release tag, or press **Update** in a sidebar. From 2.1.0, setup moves a root `podarcis.yaml` and `.env` into `.agents/`. Vaults set up with 1.x no longer use `agents.toml` and `agents.lock`; delete them.
 
-[Recommended MCP servers](skills/podarcis/references/mcp-servers.yaml) and their credentials:
+[Recommended MCP servers](skills/podarcis/references/mcp-servers.yaml) and their credentials, kept in `.agents/.env`:
 
 | Server | Credentials |
 |---|---|
-| `semantic-scholar` | Optional `SEMANTIC_SCHOLAR_API_KEY` in `.env` |
-| `google-drive` | `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env`; OAuth on first use |
+| `semantic-scholar` | Optional `SEMANTIC_SCHOLAR_API_KEY` |
+| `google-drive` | `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; OAuth on first use |
 | `overleaf-suggest` | Node.js 22+, SSH access to `gitlab-internal.bsc.es`, and a one-time `login` command from its setup note |
 
 ## Sidebars
 
-To configure a vault from a sidebar instead of `podarcis.yaml`, install [podarcis-obsidian](https://github.com/XicuM/podarcis-obsidian) or [podarcis-vscode](https://github.com/XicuM/podarcis-vscode). They run this skill's `config` and `setup` commands, and in a vault without the skill run them from the latest release, which installs it.
+To configure a vault from a sidebar, including credentials, custom servers, and extra skills, install [podarcis-obsidian](https://github.com/XicuM/podarcis-obsidian) or [podarcis-vscode](https://github.com/XicuM/podarcis-vscode). They run this skill's `config` and `setup` commands, and in a vault without the skill run them from the latest release, which installs it.
 
 ## Development
 

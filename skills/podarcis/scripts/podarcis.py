@@ -18,11 +18,13 @@ from pathlib import Path
 
 import yaml
 
-VERSION = '2.0.0'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
+VERSION = '2.1.0'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
 ARCHIVE = f'https://github.com/XicuM/podarcis-skill/archive/refs/tags/v{VERSION}.tar.gz'
 SKILL = Path(__file__).resolve().parents[1]
 REPOS = ('sources', 'wiki', 'workspace')
 AGENTS = ['claude', 'codex', 'opencode', 'vscode']
+CONFIG = Path('.agents', 'podarcis.yaml')
+ENV = Path('.agents', '.env')
 
 
 def ingest(
@@ -135,9 +137,9 @@ def status(root: Path, state: str = 'all') -> list[dict[str, str]]:
 
 
 def check_config(config: object) -> dict:
-    """Validate podarcis.yaml content and fill its defaults."""
+    """Validate .agents/podarcis.yaml content and fill its defaults."""
     if not isinstance(config, dict) or set(config) - {'agents', 'repos', 'mcp', 'skills'}:
-        raise ValueError('podarcis.yaml takes only agents, repos, mcp, and skills.')
+        raise ValueError('The configuration takes only agents, repos, mcp, and skills.')
     agents = config.get('agents', AGENTS)
     repos = config.get('repos') or {}
     mcp = config.get('mcp') or []
@@ -197,13 +199,19 @@ def repo_state(path: Path) -> dict:
 
 
 def config_state(root: Path) -> dict:
-    """Return the vault's configuration, the catalogue, and each folder's Git state."""
-    path = root / 'podarcis.yaml'
+    """Return the configuration, the catalogue, each folder's Git state, and which credentials are set."""
+    path = root / CONFIG
+    if not path.exists():
+        path = root / 'podarcis.yaml'  # Before 2.1.0; setup moves it.
     config = yaml.safe_load(path.read_text(encoding='utf-8')) if path.exists() else {}
+    env = (root / ENV).read_text(encoding='utf-8') if (root / ENV).exists() else ''
     return {
+        'version': VERSION,
         'config': check_config(config or {}),
         'catalogue': load_catalogue(),
         'repos': {name: repo_state(root / name) for name in REPOS},
+        # Only the names: agents read this output, and credentials must not reach them.
+        'env': sorted(set(re.findall(r'^[ \t]*(?:export[ \t]+)?([A-Za-z_]\w*)[ \t]*=[ \t]*[^\s#]', env, re.MULTILINE))),
     }
 
 
@@ -313,12 +321,21 @@ def write_agents(root: Path, agents: list[str], servers: list[dict], skills: lis
                 link.symlink_to(Path('..', '..', '.agents', 'skills', skill))
 
 
-def setup(root: Path, config: dict | None = None) -> dict:
-    """Clone or link the vault folders, install the skills, and configure each agent's MCP servers."""
-    if config is not None or not (root / 'podarcis.yaml').exists():
-        config = check_config(config or {})
-        (root / 'podarcis.yaml').write_text(
-            yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding='utf-8'
+def setup(root: Path, config: dict | None = None, env: dict | None = None) -> dict:
+    """Clone or link the vault folders, install the skills, configure each agent's MCP servers, and store credentials."""
+    if config is not None:
+        config = check_config(config)
+    for key, value in (env or {}).items():
+        if not re.fullmatch(r'[A-Za-z_]\w*', key) or not re.fullmatch(r'[^\s\'"#\\]+', str(value)):
+            raise ValueError(f'Credential {key} needs a name of letters, digits, and _, '
+                             'and a value without spaces, quotes, #, or backslashes.')
+    (root / '.agents').mkdir(exist_ok=True)
+    for old, new in (('podarcis.yaml', CONFIG), ('.env', ENV)):
+        if (root / old).exists() and not (root / new).exists():
+            (root / old).rename(root / new)  # Vaults before 2.1.0 kept both in the root.
+    if config is not None or not (root / CONFIG).exists():
+        (root / CONFIG).write_text(
+            yaml.safe_dump(config or check_config({}), sort_keys=False, allow_unicode=True), encoding='utf-8'
         )
     state = config_state(root)
     config, catalogue = state['config'], state['catalogue']
@@ -352,7 +369,12 @@ def setup(root: Path, config: dict | None = None) -> dict:
     for skill in skills:
         actions[skill['name']] = fetch_skill(root, skill)
     write_agents(root, config['agents'], servers, ['podarcis', *(s['name'] for s in skills)])
-    (root / '.env').touch(mode=0o600)
+    (root / ENV).touch(mode=0o600)
+    (root / ENV).chmod(0o600)  # Also a moved or hand-made file.
+    if env:
+        lines = [line for line in (root / ENV).read_text(encoding='utf-8').splitlines()
+                 if not re.match(rf'[ \t]*(export[ \t]+)?({"|".join(env)})[ \t]*=', line)]
+        (root / ENV).write_text('\n'.join([*lines, *(f'{k}={v}' for k, v in env.items())]) + '\n', encoding='utf-8')
     return {**config_state(root), 'actions': actions}
 
 
@@ -361,9 +383,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog='podarcis')
     parser.add_argument('--root', default='.', help='Vault path; defaults to cwd')
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('config', help='Show podarcis.yaml, recommended servers, and repo state')
-    configure = commands.add_parser('setup', help='Apply podarcis.yaml to the vault')
-    configure.add_argument('--stdin', action='store_true', help='Replace podarcis.yaml with JSON from stdin first')
+    commands.add_parser('config', help='Show the configuration, recommended servers, and repo state')
+    configure = commands.add_parser('setup', help='Apply .agents/podarcis.yaml to the vault')
+    configure.add_argument('--stdin', action='store_true', help='Replace the configuration with JSON from stdin first; its env key sets credentials')
     add = commands.add_parser('ingest', help='Import OpenAlex JSON and a local PDF')
     add.add_argument('metadata', type=Path, help='Complete OpenAlex get works JSON')
     add.add_argument('source_id')
@@ -385,7 +407,9 @@ def main() -> None:
         if args.command == 'config':
             result = config_state(root)
         elif args.command == 'setup':
-            result = setup(root, json.load(sys.stdin) if args.stdin else None)
+            config = json.load(sys.stdin) if args.stdin else None
+            env = config.pop('env', None) if isinstance(config, dict) else None
+            result = setup(root, config, env)
         elif args.command == 'ingest':
             result = ingest(root, args.metadata, args.pdf_path, args.source_id, args.domain)
         else:
