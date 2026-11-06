@@ -3,7 +3,7 @@ name: podarcis
 description: Search OpenAlex, import papers and team files (meeting notes, slides, documents, data) into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for research work in a vault with sources/, wiki/, and workspace/.
 license: AGPL-3.0
 metadata:
-  version: 2.2.0
+  version: 2.2.1
 ---
 
 # Podarcis
@@ -66,7 +66,7 @@ uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" \
 
 Run each step only after the preceding command succeeds. Use `get works` without `--select` for ingestion: it needs a complete work record, not search output. You can resolve a DOI with `get works https://doi.org/<doi>`. Before ingesting any downloaded or user-supplied PDF, inspect its opening pages and check the title, DOI when present, and publication version against the metadata. OpenAlex locations can point to another journal edition or preprint. Resolve the matching DOI or report an unresolved mismatch; extraction cannot establish document identity. When no PDF can be downloaded, report the failure and use a PDF supplied by the user if available. Never substitute an unrelated document. Remove only the temporary files you created once import succeeds or they are no longer needed.
 
-Ingestion produces `sources/<domain>/<source_id>/source.md` and `original.pdf`, with `kind: paper`. IDs and domain folders use snake_case; domains can be nested. Existing IDs are never replaced, and failed imports leave no partial source. Extraction uses PyMuPDF4LLM with OCR disabled; scanned PDFs need OCR elsewhere. Local ingest and status commands return JSON on stdout and errors on stderr.
+Ingestion produces `sources/<domain>/<source_id>/source.md` and `original.pdf`, with `kind: paper`. IDs and domain folders use snake_case; domains can be nested, or `""` to place a source directly in `sources/`. Existing IDs are never replaced, and failed imports leave no partial source. Extraction uses PyMuPDF4LLM with OCR disabled; scanned PDFs need OCR elsewhere. Local ingest and status commands return JSON on stdout and errors on stderr.
 
 `OPENALEX_API_KEY` is optional for metadata requests and required for OpenAlex-hosted full text; without it, the downloader tries the work's recorded PDF locations. Set credentials through the process environment; do not put keys in prompts, command arguments, committed files, or output. Do not automatically load unrelated `.env` files. API budgets and endpoint availability are controlled by OpenAlex; surface exhaustion and paid-plan restrictions rather than repeatedly retrying them.
 

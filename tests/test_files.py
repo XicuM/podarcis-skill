@@ -211,3 +211,11 @@ def test_changed_text_from_with_identical_file_is_a_new_revision(root, pdf, docx
     result = podarcis.add(root, pdf, 'doc', 'team', origin=origin | {'revision': 'v2'}, text_from=edited)
     assert result['changed'] is True
     assert 'Site C' in (root / result['path']).read_text()
+
+
+def test_sources_can_sit_directly_in_sources(root, tmp_path):
+    notes = tmp_path / 'n.md'
+    notes.write_text('# Notes\n\nText.\n')
+    result = podarcis.add(root, notes, 'top_notes', '')
+    assert result['path'] == 'sources/top_notes/source.md'
+    assert podarcis.status(root)[0]['domain'] == ''

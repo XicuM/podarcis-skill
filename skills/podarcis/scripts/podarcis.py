@@ -24,7 +24,7 @@ from pathlib import Path
 
 import yaml
 
-VERSION = '2.2.0'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
+VERSION = '2.2.1'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
 ARCHIVE = f'https://github.com/XicuM/podarcis-skill/archive/refs/tags/v{VERSION}.tar.gz'
 SKILL = Path(__file__).resolve().parents[1]
 REPOS = ('sources', 'wiki', 'workspace')
@@ -53,7 +53,7 @@ def ingest(
 ) -> dict[str, str]:
     """Store OpenAlex metadata and extracted PDF text as one source.md."""
     if not re.fullmatch(r'[a-z][a-z0-9_]*', source_id) or not re.fullmatch(
-        r'[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*', domain
+        r'([a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*)?', domain
     ):
         raise ValueError('source_id and domain folders must be snake_case.')
     sources = root / 'sources'
@@ -283,7 +283,7 @@ def add(
     export of a deck stored as PDF) without storing it; attachments are stored unchanged beside
     the original (such as one CSV per spreadsheet tab).
     """
-    if not re.fullmatch(SNAKE, source_id) or not re.fullmatch(rf'{SNAKE}(/{SNAKE})*', domain):
+    if not re.fullmatch(SNAKE, source_id) or not re.fullmatch(rf'({SNAKE}(/{SNAKE})*)?', domain):
         raise ValueError('source_id and domain folders must be snake_case.')
     if 'revisions' in domain.split('/'):
         raise ValueError('"revisions" is reserved for source snapshots.')
@@ -468,7 +468,7 @@ def status(root: Path, state: str = 'all') -> list[dict[str, object]]:
         if state == 'all' or state == citation or (state == 'cited' and citation == 'stale'):
             item = {
                 'id': paper.name,
-                'domain': paper.parent.relative_to(sources).as_posix(),
+                'domain': '' if paper.parent == sources else paper.parent.relative_to(sources).as_posix(),
                 'path': entry.relative_to(root).as_posix(),
                 'kind': meta.get('kind', 'paper'),
                 'status': citation,
@@ -756,12 +756,12 @@ def main() -> None:
     paper = commands.add_parser('ingest', help='Import OpenAlex JSON and a local PDF')
     paper.add_argument('metadata', type=Path, help='Complete OpenAlex get works JSON')
     paper.add_argument('source_id')
-    paper.add_argument('domain', help='Relative snake_case folders under sources/')
+    paper.add_argument('domain', help='Relative snake_case folders under sources/, or "" for none')
     paper.add_argument('--pdf-path', required=True, type=Path)
     other = commands.add_parser('add', help='Import any file (notes, slides, documents, data, media) as a source')
     other.add_argument('file', type=Path, help='Local file to snapshot; the original is kept unchanged')
     other.add_argument('source_id')
-    other.add_argument('domain', help='Relative snake_case folders under sources/')
+    other.add_argument('domain', help='Relative snake_case folders under sources/, or "" for none')
     other.add_argument('--kind', help='paper, meeting-notes, slides, document, dataset, media, ...; guessed from the extension')
     other.add_argument('--title', help='Defaults to the file name')
     other.add_argument('--date', help='YYYY-MM-DD the content refers to, such as the meeting date')

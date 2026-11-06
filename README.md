@@ -20,7 +20,7 @@ Agents follow the [skill](skills/podarcis/SKILL.md) and the [vault contract](ski
 Requires [uv](https://docs.astral.sh/uv/), plus git to sync folders with Git repositories. In the vault folder:
 
 ```bash
-uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.2.0/skills/podarcis/scripts/podarcis.py setup
+uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.2.1/skills/podarcis/scripts/podarcis.py setup
 ```
 
 This installs the skill in `.agents/skills/podarcis` and creates the vault folders and three files in `.agents/podarcis/`. Use a [sidebar](#sidebars), or edit the files and run setup again with `uv run .agents/skills/podarcis/scripts/podarcis.py setup`.
