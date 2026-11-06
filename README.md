@@ -13,17 +13,17 @@ vault/
 └── workspace/         # Deliverables citing wiki pages
 ```
 
-Agents follow the [skill](skills/podarcis/SKILL.md) and the [vault contract](skills/podarcis/references/vault.md).
+Agents follow the [skill](skills/podarcis/SKILL.md) and the [vault contract](skills/podarcis/references/vault.md). In a vault, setup writes the skill's instructions to `.agents/podarcis/AGENTS.md` and links the vault's `AGENTS.md` to it, so every agent that reads `AGENTS.md` (Claude Code, Codex, OpenCode, VS Code) loads them in every session instead of choosing whether to open a skill. Add the vault's own instructions to `.agents/podarcis/AGENTS.local.md`; setup appends them. A vault that already has its own `AGENTS.md` file keeps it, and setup reports that it was not linked.
 
 ## Set up a vault
 
 Requires [uv](https://docs.astral.sh/uv/), plus git to sync folders with Git repositories. In the vault folder:
 
 ```bash
-uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.2.1/skills/podarcis/scripts/podarcis.py setup
+uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.3.0/skills/podarcis/scripts/podarcis.py setup
 ```
 
-This installs the skill in `.agents/skills/podarcis` and creates the vault folders and three files in `.agents/podarcis/`. Use a [sidebar](#sidebars), or edit the files and run setup again with `uv run .agents/skills/podarcis/scripts/podarcis.py setup`.
+This installs the skill's scripts in `.agents/podarcis/lib`, writes the agent instructions, and creates the vault folders and three settings files in `.agents/podarcis/`. Setup also removes the `.agents/skills/podarcis` skill that versions 2.2 and older installed. Use a [sidebar](#sidebars), or edit the files and run setup again with `uv run .agents/podarcis/lib/scripts/podarcis.py setup`.
 
 `config.yaml` says where each vault folder syncs to:
 
