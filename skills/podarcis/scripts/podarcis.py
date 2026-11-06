@@ -18,13 +18,28 @@ from pathlib import Path
 
 import yaml
 
-VERSION = '2.1.0'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
+VERSION = '2.2.0'  # Equal to metadata.version in SKILL.md; a script run from a URL has no SKILL.md.
 ARCHIVE = f'https://github.com/XicuM/podarcis-skill/archive/refs/tags/v{VERSION}.tar.gz'
 SKILL = Path(__file__).resolve().parents[1]
 REPOS = ('sources', 'wiki', 'workspace')
-AGENTS = ['claude', 'codex', 'opencode', 'vscode']
-CONFIG = Path('.agents', 'podarcis.yaml')
-ENV = Path('.agents', '.env')
+AGENTS = ['claude', 'codex', 'opencode', 'vscode']  # Setup configures every one of them.
+SETTINGS = Path('.agents', 'podarcis')
+CONFIG = SETTINGS / 'config.yaml'  # Where each vault folder syncs to.
+TOOLS = SETTINGS / 'tools.yaml'  # MCP servers and extra skills the agents get.
+ENV = SETTINGS / '.env'  # Credentials the tools read.
+# Older layouts, newest first; setup moves them into SETTINGS.
+LEGACY_CONFIG = (Path('.agents', 'podarcis.yaml'), Path('podarcis.yaml'))
+LEGACY_ENV = (Path('.agents', '.env'), Path('.env'))
+RETIRED = {'google-drive'}  # Recommended servers since removed; setup drops them.
+HEADERS = {
+    CONFIG: '# Podarcis vault settings. Each folder takes a Git URL, or null to stay a local folder.\n'
+            '# Edit, then run: uv run .agents/skills/podarcis/scripts/podarcis.py setup\n',
+    TOOLS: '# Tools for every agent in this vault (Claude Code, Codex, OpenCode, VS Code).\n'
+           '# mcp: names from .agents/skills/podarcis/references/mcp-servers.yaml, or custom\n'
+           '#   entries with name plus command and args, or url and headers.\n'
+           '# skills: extra skills, each with name, source (owner/repo or git:<url>), and optional ref and path.\n'
+           '# Credentials go in .agents/podarcis/.env. Edit, then run setup.\n',
+}
 
 
 def ingest(
@@ -137,15 +152,13 @@ def status(root: Path, state: str = 'all') -> list[dict[str, str]]:
 
 
 def check_config(config: object) -> dict:
-    """Validate .agents/podarcis.yaml content and fill its defaults."""
+    """Validate the combined content of config.yaml and tools.yaml and fill its defaults."""
+    # agents is from before 2.2.0, when each vault chose its agents; every agent is configured now.
     if not isinstance(config, dict) or set(config) - {'agents', 'repos', 'mcp', 'skills'}:
-        raise ValueError('The configuration takes only agents, repos, mcp, and skills.')
-    agents = config.get('agents', AGENTS)
+        raise ValueError('The configuration takes only repos, mcp, and skills.')
     repos = config.get('repos') or {}
     mcp = config.get('mcp') or []
     skills = config.get('skills') or []
-    if not isinstance(agents, list) or not set(agents) <= set(AGENTS) or len(set(agents)) != len(agents):
-        raise ValueError(f'agents takes only {", ".join(AGENTS)}.')
     if not isinstance(repos, dict) or set(repos) - set(REPOS):
         raise ValueError(f'repos takes only {", ".join(REPOS)}.')
     repos = {name: repos.get(name) or None for name in REPOS}
@@ -154,6 +167,7 @@ def check_config(config: object) -> dict:
     catalogue = load_catalogue()
     if not isinstance(mcp, list):
         raise ValueError('mcp must be a list.')
+    mcp = [m for m in mcp if not (isinstance(m, str) and m in RETIRED)]
     names = [m if isinstance(m, str) else m.get('name') if isinstance(m, dict) else None for m in mcp]
     if None in names or len(set(names)) != len(names):
         raise ValueError('mcp entries need unique names.')
@@ -175,7 +189,32 @@ def check_config(config: object) -> dict:
     ):
         raise ValueError('skills entries need a name other than podarcis, a source (owner/repo or git:<url>), '
                          'and optionally ref and path.')
-    return {'agents': agents, 'repos': repos, 'mcp': mcp, 'skills': skills}
+    return {'repos': repos, 'mcp': mcp, 'skills': skills}
+
+
+def read_config(root: Path) -> dict:
+    """Read config.yaml and tools.yaml, or the single file of an older vault, without validating."""
+    if (root / CONFIG).exists() or (root / TOOLS).exists():
+        config = {}
+        for path in (CONFIG, TOOLS):
+            part = yaml.safe_load((root / path).read_text(encoding='utf-8')) if (root / path).exists() else None
+            if part is not None and not isinstance(part, dict):
+                raise ValueError(f'{path} must be a mapping.')
+            config.update(part or {})
+        return config
+    for path in LEGACY_CONFIG:
+        if (root / path).exists():
+            return yaml.safe_load((root / path).read_text(encoding='utf-8')) or {}
+    return {}
+
+
+def write_config(root: Path, config: dict) -> None:
+    """Write the repositories to config.yaml and the tools to tools.yaml."""
+    (root / SETTINGS).mkdir(parents=True, exist_ok=True)
+    for path, part in ((CONFIG, {'repos': config['repos']}),
+                       (TOOLS, {'mcp': config['mcp'], 'skills': config['skills']})):
+        body = yaml.safe_dump(part, sort_keys=False, allow_unicode=True)
+        (root / path).write_text(HEADERS[path] + '\n' + body, encoding='utf-8')
 
 
 def load_catalogue() -> dict:
@@ -200,14 +239,11 @@ def repo_state(path: Path) -> dict:
 
 def config_state(root: Path) -> dict:
     """Return the configuration, the catalogue, each folder's Git state, and which credentials are set."""
-    path = root / CONFIG
-    if not path.exists():
-        path = root / 'podarcis.yaml'  # Before 2.1.0; setup moves it.
-    config = yaml.safe_load(path.read_text(encoding='utf-8')) if path.exists() else {}
-    env = (root / ENV).read_text(encoding='utf-8') if (root / ENV).exists() else ''
+    env_path = next((p for p in (ENV, *LEGACY_ENV) if (root / p).exists()), ENV)  # Setup moves an old one.
+    env = (root / env_path).read_text(encoding='utf-8') if (root / env_path).exists() else ''
     return {
         'version': VERSION,
-        'config': check_config(config or {}),
+        'config': check_config(read_config(root)),
         'catalogue': load_catalogue(),
         'repos': {name: repo_state(root / name) for name in REPOS},
         # Only the names: agents read this output, and credentials must not reach them.
@@ -269,8 +305,8 @@ def fetch_skill(root: Path, skill: dict) -> str:
     return 'installed'
 
 
-def write_agents(root: Path, agents: list[str], servers: list[dict], skills: list[str]) -> None:
-    """Write each selected agent's MCP servers, keeping its other settings, and link skills for Claude."""
+def write_agents(root: Path, servers: list[dict], skills: list[str]) -> None:
+    """Write every agent's MCP servers, keeping its other settings, and link skills for Claude."""
     def stdio(m: dict) -> bool:
         return 'command' in m
 
@@ -284,7 +320,7 @@ def write_agents(root: Path, agents: list[str], servers: list[dict], skills: lis
                      *m.get('args', [])]} if stdio(m) else {'type': 'remote', 'url': m['url'],
                      'headers': m.get('headers', {})}),
     }
-    for agent in agents:
+    for agent in AGENTS:
         if agent == 'codex':
             # Replace only the [mcp_servers.*] tables; the rest of config.toml is the user's.
             path = root / '.codex' / 'config.toml'
@@ -312,13 +348,12 @@ def write_agents(root: Path, agents: list[str], servers: list[dict], skills: lis
         data[key] = {m['name']: entry(m) for m in servers}
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    if 'claude' in agents:
-        # Claude Code reads skills only from .claude/skills; the others read .agents/skills.
-        (root / '.claude' / 'skills').mkdir(parents=True, exist_ok=True)
-        for skill in skills:
-            link = root / '.claude' / 'skills' / skill
-            if not link.exists() and not link.is_symlink():
-                link.symlink_to(Path('..', '..', '.agents', 'skills', skill))
+    # Claude Code reads skills only from .claude/skills; the others read .agents/skills.
+    (root / '.claude' / 'skills').mkdir(parents=True, exist_ok=True)
+    for skill in skills:
+        link = root / '.claude' / 'skills' / skill
+        if not link.exists() and not link.is_symlink():
+            link.symlink_to(Path('..', '..', '.agents', 'skills', skill))
 
 
 def setup(root: Path, config: dict | None = None, env: dict | None = None) -> dict:
@@ -329,14 +364,16 @@ def setup(root: Path, config: dict | None = None, env: dict | None = None) -> di
         if not re.fullmatch(r'[A-Za-z_]\w*', key) or not re.fullmatch(r'[^\s\'"#\\]+', str(value)):
             raise ValueError(f'Credential {key} needs a name of letters, digits, and _, '
                              'and a value without spaces, quotes, #, or backslashes.')
-    (root / '.agents').mkdir(exist_ok=True)
-    for old, new in (('podarcis.yaml', CONFIG), ('.env', ENV)):
-        if (root / old).exists() and not (root / new).exists():
-            (root / old).rename(root / new)  # Vaults before 2.1.0 kept both in the root.
-    if config is not None or not (root / CONFIG).exists():
-        (root / CONFIG).write_text(
-            yaml.safe_dump(config or check_config({}), sort_keys=False, allow_unicode=True), encoding='utf-8'
-        )
+    # Read before moving anything, so an invalid old configuration leaves the vault as it was.
+    stored = check_config(read_config(root)) if config is None else config
+    (root / SETTINGS).mkdir(parents=True, exist_ok=True)
+    for old in LEGACY_ENV:  # .env in the root before 2.1.0, in .agents/ before 2.2.0.
+        if (root / old).exists() and not (root / ENV).exists():
+            (root / old).rename(root / ENV)
+    if config is not None or not ((root / CONFIG).exists() and (root / TOOLS).exists()):
+        write_config(root, stored)
+    for old in LEGACY_CONFIG:
+        (root / old).unlink(missing_ok=True)
     state = config_state(root)
     config, catalogue = state['config'], state['catalogue']
     actions = {}
@@ -368,7 +405,7 @@ def setup(root: Path, config: dict | None = None, env: dict | None = None) -> di
             servers.append(item)
     for skill in skills:
         actions[skill['name']] = fetch_skill(root, skill)
-    write_agents(root, config['agents'], servers, ['podarcis', *(s['name'] for s in skills)])
+    write_agents(root, servers, ['podarcis', *(s['name'] for s in skills)])
     (root / ENV).touch(mode=0o600)
     (root / ENV).chmod(0o600)  # Also a moved or hand-made file.
     if env:
@@ -384,7 +421,7 @@ def main() -> None:
     parser.add_argument('--root', default='.', help='Vault path; defaults to cwd')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('config', help='Show the configuration, recommended servers, and repo state')
-    configure = commands.add_parser('setup', help='Apply .agents/podarcis.yaml to the vault')
+    configure = commands.add_parser('setup', help='Apply .agents/podarcis/config.yaml and tools.yaml to the vault')
     configure.add_argument('--stdin', action='store_true', help='Replace the configuration with JSON from stdin first; its env key sets credentials')
     add = commands.add_parser('ingest', help='Import OpenAlex JSON and a local PDF')
     add.add_argument('metadata', type=Path, help='Complete OpenAlex get works JSON')

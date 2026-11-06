@@ -1,8 +1,8 @@
 # Recommended MCP servers. Enable one by adding its name to `mcp` in a vault's
-# .agents/podarcis.yaml, then run setup. `mcp` holds the server's command and
-# args, or url and headers; `env` names the credentials it reads from the
-# vault's .agents/.env (commands run from the vault root); `skills` holds
-# skills installed with the server.
+# .agents/podarcis/tools.yaml, then run setup. `mcp` holds the server's command
+# and args, or url and headers; `env` names the credentials it reads from the
+# vault's .agents/podarcis/.env (commands run from the vault root); `skills`
+# holds skills installed with the server.
 
 semantic-scholar:
   description: Semantic Scholar search, full-text snippets, recommendations, and BibTeX.
@@ -10,15 +10,7 @@ semantic-scholar:
   env: [SEMANTIC_SCHOLAR_API_KEY]
   mcp:
     command: uv
-    args: [run, --env-file, .agents/.env, --no-project, --with, s2-mcp-server==1.7.12, s2-mcp-server]
-
-google-drive:
-  description: Google Drive search and file access (core Drive tools only).
-  setup: Needs an OAuth client from a Google Cloud project with the Drive API enabled; the first tool call starts the OAuth flow.
-  env: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET]
-  mcp:
-    command: uv
-    args: [run, --env-file, .agents/.env, --no-project, --with, workspace-mcp==2.2.1, workspace-mcp, --transport, stdio, --tools, drive, --tool-tier, core]
+    args: [run, --env-file, .agents/podarcis/.env, --no-project, --with, s2-mcp-server==1.7.12, s2-mcp-server]
 
 overleaf-suggest:
   description: Propose Overleaf edits as tracked suggestions and comments; read files and fetch PDFs.

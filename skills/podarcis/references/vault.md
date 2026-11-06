@@ -3,8 +3,10 @@
 ```text
 vault/
 ├── .agents/
-│   ├── podarcis.yaml      # repository URLs, agent targets, MCP servers, extra skills
-│   ├── .env               # credentials, private
+│   ├── podarcis/
+│   │   ├── config.yaml    # Git URL of each vault folder
+│   │   ├── tools.yaml     # MCP servers and extra skills, for every agent
+│   │   └── .env           # credentials, private
 │   └── skills/
 ├── sources/<optional/domain/folders>/<source_id>/
 │   ├── source.md

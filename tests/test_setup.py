@@ -60,8 +60,10 @@ def test_setup_clones_installs_and_configures_each_agent(tmp_path):
         'sources': 'unchanged', 'wiki': 'cloned', 'workspace': 'unchanged', 'podarcis': f'installed {podarcis.VERSION}',
     }
     assert state['repos']['wiki'] == {'state': 'repo', 'url': wiki}
-    assert yaml.safe_load((root / '.agents/podarcis.yaml').read_text())['repos']['wiki'] == wiki
-    assert (root / '.agents/.env').stat().st_mode & 0o777 == 0o600
+    assert yaml.safe_load((root / '.agents/podarcis/config.yaml').read_text()) == {
+        'repos': {'sources': None, 'wiki': wiki, 'workspace': None}}
+    assert yaml.safe_load((root / '.agents/podarcis/tools.yaml').read_text()) == {'mcp': config['mcp'], 'skills': []}
+    assert (root / '.agents/podarcis/.env').stat().st_mode & 0o777 == 0o600
     assert (root / '.agents/skills/podarcis/scripts/podarcis.py.lock').is_file()
     assert (root / '.claude/skills/podarcis/SKILL.md').is_file()
 
@@ -90,29 +92,37 @@ def test_setup_clones_installs_and_configures_each_agent(tmp_path):
 
     # The installed copy reruns setup without reinstalling itself, and repoints a changed remote.
     moved = bare_repo(tmp_path / 'moved.git')
-    (root / '.agents/podarcis.yaml').write_text(f'agents: [codex]\nrepos:\n  wiki: {moved}\n')
+    (root / '.agents/podarcis/config.yaml').write_text(f'repos:\n  wiki: {moved}\n')
+    (root / '.agents/podarcis/tools.yaml').write_text('# mine\nmcp: []\n')
     rerun = run(root, 'setup', script=str(root / '.agents/skills/podarcis/scripts/podarcis.py'))
     assert rerun.returncode == 0, rerun.stderr
     assert json.loads(rerun.stdout)['actions'] == {'sources': 'unchanged', 'wiki': 'remote updated', 'workspace': 'unchanged'}
     url = subprocess.run(['git', '-C', str(root / 'wiki'), 'remote', 'get-url', 'origin'],
                          capture_output=True, text=True).stdout.strip()
     assert url == moved
+    # Every agent follows tools.yaml, and setup leaves the user's own edits to it alone.
     assert tomllib.loads((root / '.codex/config.toml').read_text()) == {'model': 'o3', 'profiles': {'fast': {'model': 'mini'}}}
-    assert 'custom' in json.loads((root / '.mcp.json').read_text())['mcpServers']  # unselected agents are left alone
+    assert json.loads((root / '.mcp.json').read_text())['mcpServers'] == {}
+    assert (root / '.agents/podarcis/tools.yaml').read_text() == '# mine\nmcp: []\n'
 
 
 def test_first_setup_writes_default_config(tmp_path):
     result = run(tmp_path, 'setup')
     assert result.returncode == 0, result.stderr
-    assert yaml.safe_load((tmp_path / '.agents/podarcis.yaml').read_text()) == json.loads(result.stdout)['config']
+    config = json.loads(result.stdout)['config']
+    assert yaml.safe_load((tmp_path / '.agents/podarcis/config.yaml').read_text()) == {'repos': config['repos']}
+    assert yaml.safe_load((tmp_path / '.agents/podarcis/tools.yaml').read_text()) == {'mcp': [], 'skills': []}
+    assert (tmp_path / '.agents/podarcis/tools.yaml').read_text().startswith('# Tools for every agent')
     assert not (tmp_path / 'podarcis.yaml').exists() and not (tmp_path / '.env').exists()
     assert all((tmp_path / name).is_dir() for name in ('sources', 'wiki', 'workspace'))
     assert json.loads((tmp_path / '.vscode/mcp.json').read_text()) == {'servers': {}}
+    assert json.loads((tmp_path / '.mcp.json').read_text()) == {'mcpServers': {}}
+    assert (tmp_path / '.codex/config.toml').is_file() and (tmp_path / '.opencode/opencode.jsonc').is_file()
 
 
 def test_extra_skills_are_fetched_at_their_ref_and_linked_for_claude(tmp_path):
     url, commit = skill_repo(tmp_path / 'skills')
-    config = {'agents': ['claude'], 'skills': [{'name': 'extra', 'source': f'git:{url}', 'ref': commit, 'path': 'sub/skill'}]}
+    config = {'skills': [{'name': 'extra', 'source': f'git:{url}', 'ref': commit, 'path': 'sub/skill'}]}
     result = run(tmp_path / 'skills', 'setup', '--stdin', stdin=json.dumps(config))  # any folder works as a vault
     root = tmp_path / 'skills'
     assert result.returncode == 0, result.stderr
@@ -156,7 +166,6 @@ def test_setup_refuses_to_rewrite_commented_json(tmp_path):
     ({'mcp': ['unknown-server']}, 'Not a recommended MCP server'),
     ({'mcp': ['semantic-scholar', 'semantic-scholar']}, 'unique names'),
     ({'mcp': [{'name': 'both', 'command': 'x', 'url': 'https://example.org'}]}, 'either command and args'),
-    ({'agents': ['cursor']}, 'agents takes only claude, codex, opencode, vscode'),
     ({'repos': {'notes': 'x'}}, 'repos takes only'),
     ({'repos': {'wiki': '--upload-pack=touch'}}, 'Git URL'),
     ({'skills': [{'name': 'podarcis', 'source': 'x/y'}]}, 'other than podarcis'),
@@ -189,7 +198,7 @@ def test_script_run_alone_installs_its_release_first(tmp_path, monkeypatch, caps
     podarcis.main()
     assert 'semantic-scholar' in json.loads(capsys.readouterr().out)['catalogue']
     assert (root / '.agents/skills/podarcis/scripts/podarcis.py').is_file()
-    assert not (root / '.agents/podarcis.yaml').exists()
+    assert not (root / '.agents/podarcis').exists()
 
 
 def test_release_without_the_skill_is_reported(tmp_path, monkeypatch):
@@ -212,42 +221,58 @@ def test_config_reports_defaults_catalogue_and_folders(tmp_path):
     state = json.loads(result.stdout)
     assert state['version'] == podarcis.VERSION and state['env'] == []
     assert state['config'] == {
-        'agents': ['claude', 'codex', 'opencode', 'vscode'],
         'repos': {'sources': None, 'wiki': None, 'workspace': None},
         'mcp': [],
         'skills': [],
     }
-    assert set(state['catalogue']) == {'semantic-scholar', 'google-drive', 'overleaf-suggest'}
+    assert set(state['catalogue']) == {'semantic-scholar', 'overleaf-suggest'}
     assert state['repos']['wiki'] == {'state': 'local', 'url': None, 'empty': True}
     assert state['repos']['sources'] == {'state': 'missing', 'url': None}
 
 
-def test_setup_moves_a_2x_configuration_and_credentials_into_agents(tmp_path):
-    (tmp_path / 'podarcis.yaml').write_text('agents: [claude]\nmcp: [semantic-scholar]\n')
-    (tmp_path / '.env').write_text('SEMANTIC_SCHOLAR_API_KEY=old\n')
-    (tmp_path / '.env').chmod(0o644)
+@pytest.mark.parametrize('folder', ['', '.agents/'])
+def test_setup_splits_an_older_configuration_and_moves_credentials(tmp_path, folder):
+    # 2.0 kept podarcis.yaml and .env in the root, 2.1 in .agents/; both chose agents and could use google-drive.
+    (tmp_path / '.agents').mkdir()
+    (tmp_path / f'{folder}podarcis.yaml').write_text(
+        'agents: [claude]\nrepos:\n  wiki: null\nmcp: [semantic-scholar, google-drive]\n')
+    (tmp_path / f'{folder}.env').write_text('SEMANTIC_SCHOLAR_API_KEY=old\n')
+    (tmp_path / f'{folder}.env').chmod(0o644)
     before = json.loads(run(tmp_path, 'config').stdout)
-    assert before['config']['agents'] == ['claude'] and before['env'] == []
+    assert before['config']['mcp'] == ['semantic-scholar'] and before['env'] == ['SEMANTIC_SCHOLAR_API_KEY']
     result = run(tmp_path, 'setup')
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)['env'] == ['SEMANTIC_SCHOLAR_API_KEY']
-    assert not (tmp_path / 'podarcis.yaml').exists() and not (tmp_path / '.env').exists()
-    assert (tmp_path / '.agents/.env').read_text() == 'SEMANTIC_SCHOLAR_API_KEY=old\n'
-    assert (tmp_path / '.agents/.env').stat().st_mode & 0o777 == 0o600
+    assert not (tmp_path / f'{folder}podarcis.yaml').exists() and not (tmp_path / f'{folder}.env').exists()
+    assert yaml.safe_load((tmp_path / '.agents/podarcis/tools.yaml').read_text()) == {
+        'mcp': ['semantic-scholar'], 'skills': []}
+    assert 'agents' not in yaml.safe_load((tmp_path / '.agents/podarcis/config.yaml').read_text())
+    assert (tmp_path / '.agents/podarcis/.env').read_text() == 'SEMANTIC_SCHOLAR_API_KEY=old\n'
+    assert (tmp_path / '.agents/podarcis/.env').stat().st_mode & 0o777 == 0o600
     args = json.loads((tmp_path / '.mcp.json').read_text())['mcpServers']['semantic-scholar']['args']
-    assert args[:3] == ['run', '--env-file', '.agents/.env']
+    assert args[:3] == ['run', '--env-file', '.agents/podarcis/.env']
+    assert 'semantic-scholar' in tomllib.loads((tmp_path / '.codex/config.toml').read_text())['mcp_servers']
+
+
+def test_invalid_older_configuration_is_left_in_place(tmp_path):
+    (tmp_path / 'podarcis.yaml').write_text('mcp: [unknown-server]\n')
+    result = run(tmp_path, 'setup')
+    assert result.returncode == 1 and 'Not a recommended MCP server' in result.stderr
+    assert (tmp_path / 'podarcis.yaml').exists() and not (tmp_path / '.agents').exists()
 
 
 def test_setup_sets_credentials_and_reports_only_their_names(tmp_path):
-    (tmp_path / '.agents').mkdir()
-    (tmp_path / '.agents/.env').write_text('# mine\nKEEP=1\nexport SEMANTIC_SCHOLAR_API_KEY=old\nEMPTY=\n')
-    config = {'agents': [], 'env': {'SEMANTIC_SCHOLAR_API_KEY': 'n3w-key', 'GOOGLE_OAUTH_CLIENT_ID': 'id.apps'}}
+    (tmp_path / '.agents/podarcis').mkdir(parents=True)
+    (tmp_path / '.agents/podarcis/.env').write_text('# mine\nKEEP=1\nexport SEMANTIC_SCHOLAR_API_KEY=old\nEMPTY=\n')
+    # Sidebars before 2.2.0 still send agents; it is accepted and ignored.
+    config = {'agents': ['claude'], 'env': {'SEMANTIC_SCHOLAR_API_KEY': 'n3w-key', 'OTHER_TOKEN': 'id.apps'}}
     result = run(tmp_path, 'setup', '--stdin', stdin=json.dumps(config))
     assert result.returncode == 0, result.stderr
     assert 'n3w-key' not in result.stdout
-    assert json.loads(result.stdout)['env'] == ['GOOGLE_OAUTH_CLIENT_ID', 'KEEP', 'SEMANTIC_SCHOLAR_API_KEY']
-    assert (tmp_path / '.agents/.env').read_text() == (
-        '# mine\nKEEP=1\nEMPTY=\nSEMANTIC_SCHOLAR_API_KEY=n3w-key\nGOOGLE_OAUTH_CLIENT_ID=id.apps\n')
-    assert 'env' not in yaml.safe_load((tmp_path / '.agents/podarcis.yaml').read_text())
+    assert json.loads(result.stdout)['env'] == ['KEEP', 'OTHER_TOKEN', 'SEMANTIC_SCHOLAR_API_KEY']
+    assert (tmp_path / '.agents/podarcis/.env').read_text() == (
+        '# mine\nKEEP=1\nEMPTY=\nSEMANTIC_SCHOLAR_API_KEY=n3w-key\nOTHER_TOKEN=id.apps\n')
+    for name in ('config.yaml', 'tools.yaml'):
+        assert not {'env', 'agents'} & set(yaml.safe_load((tmp_path / '.agents/podarcis' / name).read_text()))
     bad = run(tmp_path, 'setup', '--stdin', stdin=json.dumps({'env': {'KEY': 'has space'}}))
     assert bad.returncode == 1 and 'Credential KEY' in bad.stderr

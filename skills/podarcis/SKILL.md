@@ -3,7 +3,7 @@ name: podarcis
 description: Search OpenAlex, import papers into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for literature work in a vault with sources/, wiki/, and workspace/.
 license: AGPL-3.0
 metadata:
-  version: 2.1.0
+  version: 2.2.0
 ---
 
 # Podarcis
@@ -20,14 +20,14 @@ For example, use `sed -n '1,45p' source.md` for the opening, `rg -n '^#{1,6} |ab
 
 ## Set up a vault
 
-A vault's `.agents/podarcis.yaml` declares a Git URL for each of `sources/`, `wiki/`, and `workspace/` (empty for a local folder), the agents to configure (`claude`, `codex`, `opencode`, `vscode`), and its MCP servers: names from [the recommended servers](references/mcp-servers.yaml) or custom entries with `name` plus `command` and `args`, or `url` and `headers`. Extra skills go under `skills` as `name`, `source` (`owner/repo` on GitHub or `git:<url>`), and optional `ref` and `path`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, installs this skill in `.agents/skills/podarcis` and the extra skills beside it, and writes each selected agent's MCP servers: `.mcp.json` (with skill links in `.claude/skills`), `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`. It replaces only the server lists in those files, so declare every server in `.agents/podarcis.yaml`.
+A vault's settings live in `.agents/podarcis/`. `config.yaml` declares a Git URL under `repos` for each of `sources/`, `wiki/`, and `workspace/` (null for a local folder). `tools.yaml` declares the MCP servers under `mcp`: names from [the recommended servers](references/mcp-servers.yaml) or custom entries with `name` plus `command` and `args`, or `url` and `headers`; and extra skills under `skills` as `name`, `source` (`owner/repo` on GitHub or `git:<url>`), and optional `ref` and `path`. `setup` clones missing folders, repoints changed `origin` remotes, refuses to clone into a folder with files, installs this skill in `.agents/skills/podarcis` and the extra skills beside it, and writes the MCP servers for every agent: `.mcp.json` (with skill links in `.claude/skills`), `.codex/config.toml`, `.opencode/opencode.jsonc`, and `.vscode/mcp.json`. It replaces only the server lists in those files, so declare every server in `tools.yaml`.
 
 ```bash
 uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" config  # current settings, catalogue, and repository state
 uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" setup
 ```
 
-Setup needs uv, and git when a folder has a URL or an extra skill is declared. Credentials go in the vault's `.agents/.env`, which setup creates empty and private; recommended servers read the names listed under their `env`. `config` reports only which credentials are set; never read or print `.agents/.env`. Change only the settings the user asked for, and report each server's setup note.
+Setup needs uv, and git when a folder has a URL or an extra skill is declared. Credentials go in the vault's `.agents/podarcis/.env`, which setup creates empty and private; recommended servers read the names listed under their `env`. `config` reports only which credentials are set; never read or print `.agents/podarcis/.env`. Change only the settings the user asked for, and report each server's setup note.
 
 ## Sync the vault
 
