@@ -1,11 +1,17 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml>=6.0", "pymupdf>=2.0", "pymupdf4llm>=2.0"]
+# dependencies = [
+#   "pyyaml>=6.0", "pymupdf>=2.0", "pymupdf4llm>=2.0",
+#   "python-docx>=1.1", "python-pptx>=1.0", "openpyxl>=3.1",
+# ]
 # ///
-"""Install Podarcis in a vault, set the vault up, import papers, and report wiki citation status."""
+"""Install Podarcis in a vault, set the vault up, import papers and other files, and report wiki citation status."""
 
 import argparse
 import contextlib
+import csv
+import datetime
+import hashlib
 import json
 import re
 import shutil
@@ -65,6 +71,7 @@ def ingest(
     metadata = {
         'type': 'source',
         'id': source_id,
+        'kind': 'paper',
         'title': title,
         'authors': [a['author']['display_name'] for a in work['authorships']],
         'year': work['publication_year'],
@@ -108,46 +115,369 @@ def ingest(
     return {'id': source_id, 'path': (target / 'source.md').relative_to(root).as_posix()}
 
 
-def status(root: Path, state: str = 'all') -> list[dict[str, str]]:
-    """List complete sources; cited means a wiki footnote, not validation."""
-    if state not in ('uncited', 'cited', 'all'):
-        raise ValueError('Unknown citation status.')
+SNAKE = r'[a-z][a-z0-9_]*'
+KIND = r'[a-z][a-z0-9-]*'
+DATE = r'\d{4}-\d{2}-\d{2}'
+# Default kinds by extension; any kebab-case kind is accepted with --kind.
+KINDS = {
+    '.pdf': 'document', '.docx': 'document', '.md': 'document', '.txt': 'document',
+    '.pptx': 'slides', '.xlsx': 'dataset', '.csv': 'dataset', '.tsv': 'dataset',
+    '.png': 'media', '.jpg': 'media', '.jpeg': 'media', '.gif': 'media', '.webp': 'media',
+    '.mp3': 'media', '.m4a': 'media', '.wav': 'media', '.mp4': 'media', '.webm': 'media',
+}
+TABLE_ROWS = 200  # Spreadsheet rows rendered per sheet; the original keeps the rest.
+
+
+def clean(text: str) -> str:
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    return text.encode('utf-8', errors='replace').decode('utf-8').strip()
+
+
+def table(rows: list[list[object]]) -> str:
+    """Render rows as a Markdown table whose first row is the header."""
+    cell = lambda v: '' if v is None else ' '.join(str(v).split()).replace('|', '\\|')
+    rows = [[cell(v) for v in row] for row in rows]
+    rows = [row for row in rows if any(row)]
+    if not rows:
+        return ''
+    width = max(len(row) for row in rows)
+    rows = [row + [''] * (width - len(row)) for row in rows]
+    lines = ['| ' + ' | '.join(rows[0]) + ' |', '|' + ' --- |' * width]
+    return '\n'.join(lines + ['| ' + ' | '.join(row) + ' |' for row in rows[1:]])
+
+
+def rows_section(rows: list[list[object]], total: int) -> str:
+    text = table(rows[: TABLE_ROWS + 1])
+    if total > TABLE_ROWS + 1:
+        text += f'\n\n_First {TABLE_ROWS} of {total - 1} data rows; see the original for the rest._'
+    return text
+
+
+def extract_pdf(path: Path) -> str:
+    # Converter diagnostics must not corrupt the command's JSON output.
+    with contextlib.redirect_stdout(sys.stderr):
+        import pymupdf4llm
+
+        pages = pymupdf4llm.to_markdown(str(path), use_ocr=False, page_chunks=True)
+    return '\n\n'.join(
+        f'## Page {page["metadata"]["page_number"]}\n\n{clean(page["text"])}'
+        for page in pages if clean(page['text'])
+    )
+
+
+def extract_docx(path: Path) -> str:
+    import docx
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    document = docx.Document(str(path))
+    parts = []
+    for child in document.element.body.iterchildren():
+        if child.tag.endswith('}tbl'):
+            parts.append(table([[c.text for c in r.cells] for r in Table(child, document).rows]))
+            continue
+        if not child.tag.endswith('}p'):
+            continue
+        paragraph = Paragraph(child, document)
+        text = paragraph.text.strip()
+        style = paragraph.style.name if paragraph.style is not None else ''
+        level = re.fullmatch(r'Heading (\d)', style)
+        if not text:
+            continue
+        if style == 'Title' or level:
+            # Document headings sit below the source title.
+            parts.append('#' * min(int(level[1]) + 1 if level else 2, 6) + ' ' + text)
+        elif style.startswith('List'):
+            parts.append(f'- {text}')
+        else:
+            parts.append(text)
+    return '\n\n'.join(p for p in parts if p)
+
+
+def extract_pptx(path: Path) -> str:
+    import pptx
+
+    slides = []
+    for number, slide in enumerate(pptx.Presentation(str(path)).slides, 1):
+        title = slide.shapes.title.text.strip() if slide.shapes.title is not None else ''
+        parts = [f'## Slide {number}'] + ([f'**{title}**'] if title else [])
+        for shape in slide.shapes:
+            if shape == slide.shapes.title:
+                continue
+            if shape.has_text_frame and shape.text_frame.text.strip():
+                parts.append(shape.text_frame.text.strip())
+            elif getattr(shape, 'has_table', False) and shape.has_table:
+                parts.append(table([[c.text for c in r.cells] for r in shape.table.rows]))
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame.text.strip():
+            parts.append('Speaker notes:\n\n' + slide.notes_slide.notes_text_frame.text.strip())
+        slides.append('\n\n'.join(parts))
+    return '\n\n'.join(slides)
+
+
+def extract_xlsx(path: Path) -> str:
+    import openpyxl
+
+    book = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+    sheets = []
+    for sheet in book.worksheets:
+        rows = [list(r) for r in sheet.iter_rows(values_only=True)]
+        sheets.append(f'## Sheet {sheet.title}\n\n' + rows_section(rows, len(rows)))
+    book.close()
+    return '\n\n'.join(sheets)
+
+
+def extract_csv(path: Path) -> str:
+    with path.open(encoding='utf-8', errors='replace', newline='') as stream:
+        rows = list(csv.reader(stream, delimiter='\t' if path.suffix.lower() == '.tsv' else ','))
+    return rows_section(rows, len(rows))
+
+
+def extract_text(path: Path) -> str:
+    return path.read_text(encoding='utf-8', errors='replace')
+
+
+EXTRACTORS = {
+    '.pdf': extract_pdf, '.docx': extract_docx, '.pptx': extract_pptx, '.xlsx': extract_xlsx,
+    '.csv': extract_csv, '.tsv': extract_csv, '.md': extract_text, '.txt': extract_text,
+}
+
+
+def front_matter(path: Path) -> dict:
+    """Return a Markdown file's YAML front matter, or {} when it has none or it is invalid."""
+    text = path.read_text(encoding='utf-8', errors='replace')
+    match = re.match(r'---\n(.*?)\n---\n', text, re.DOTALL)
+    try:
+        data = yaml.safe_load(match[1]) if match else None
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def find_source(sources: Path, source_id: str) -> Path | None:
+    for path in sources.rglob(source_id):
+        if path.is_dir() and path.parent.name != 'revisions' and not path.parent.name.startswith('.ingest_'):
+            return path
+    return None
+
+
+def same_origin(a: object, b: object) -> bool:
+    keys = ('provider', 'id', 'url')
+    return (
+        isinstance(a, dict) and isinstance(b, dict) and a.get('provider') == b.get('provider')
+        and any(a.get(k) and a.get(k) == b.get(k) for k in keys[1:])
+    )
+
+
+def add(
+    root: Path, file_path: Path, source_id: str, domain: str, kind: str | None = None,
+    title: str | None = None, date: str | None = None, authors: list[str] | None = None,
+    origin: dict | None = None, text_from: Path | None = None,
+    attachments: list[Path] | None = None,
+) -> dict[str, object]:
+    """Store any file as a typed, read-only source snapshot with extracted, citable text.
+
+    A file from an external provider (origin with provider plus id or url) is versioned:
+    adding changed content for the same origin keeps the previous snapshot under
+    revisions/<revision>/ so existing citations still resolve to what was read.
+    text_from extracts the text from another rendering of the same content (such as the .pptx
+    export of a deck stored as PDF) without storing it; attachments are stored unchanged beside
+    the original (such as one CSV per spreadsheet tab).
+    """
+    if not re.fullmatch(SNAKE, source_id) or not re.fullmatch(rf'{SNAKE}(/{SNAKE})*', domain):
+        raise ValueError('source_id and domain folders must be snake_case.')
+    if 'revisions' in domain.split('/'):
+        raise ValueError('"revisions" is reserved for source snapshots.')
+    file_path = file_path.expanduser()
+    if not file_path.is_file():
+        raise FileNotFoundError(f'No file at {file_path}.')
+    suffix = file_path.suffix.lower()
+    if not re.fullmatch(r'\.[a-z0-9]{1,8}', suffix or '.x'):
+        raise ValueError('The file extension must be 1-8 letters or digits.')
+    kind = kind or KINDS.get(suffix, 'other')
+    if not re.fullmatch(KIND, kind):
+        raise ValueError('kind must be lowercase kebab-case, such as meeting-notes.')
+    if date is not None and not re.fullmatch(DATE, date):
+        raise ValueError('date must be YYYY-MM-DD.')
+    if origin is not None:
+        if not isinstance(origin, dict) or not re.fullmatch(KIND, str(origin.get('provider', ''))):
+            raise ValueError('origin needs a kebab-case provider.')
+        if not (origin.get('id') or origin.get('url')):
+            raise ValueError('origin needs an id or url identifying the external file.')
+    attachments = [a.expanduser() for a in attachments or []]
+    names = {a.name for a in attachments}
+    for a in attachments:
+        if not a.is_file():
+            raise FileNotFoundError(f'No attachment at {a}.')
+        if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,99}', a.name) or a.name.startswith('original.') \
+                or a.name == 'source.md' or a.name.endswith('.md'):
+            raise ValueError(f'Attachment names must be lowercase, not .md, and not original.*: {a.name}.')
+    if len(names) != len(attachments):
+        raise ValueError('Attachment names must be unique.')
+    if text_from is not None and not text_from.expanduser().is_file():
+        raise FileNotFoundError(f'No file at {text_from}.')
+    digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    revision = str((origin or {}).get('revision') or digest[:12])
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', revision):
+        raise ValueError('origin revision must be 1-64 letters, digits, _ or -.')
+    title = ' '.join((title or file_path.stem.replace('_', ' ')).split())
+    sources = root / 'sources'
+    existing = find_source(sources, source_id)
+    if existing is not None:
+        current = front_matter(existing / 'source.md')
+        if origin is None or not same_origin(current.get('origin'), origin):
+            raise FileExistsError(f'Source ID already exists: {source_id}.')
+        target = existing
+    else:
+        target = (sources / domain / source_id).resolve()
+    if not target.is_relative_to(sources.resolve()):
+        raise ValueError('Source path leaves sources/.')
+
+    original = f'original{suffix}'
+    source = text_from.expanduser() if text_from is not None else file_path
+    extractor = EXTRACTORS.get(source.suffix.lower())
+    text = clean(extractor(source)) if extractor else ''
+    # Exports such as PDFs differ byte for byte on every download; when the citable text and
+    # attachments are the same, the content has not changed and no revision is recorded.
+    content = hashlib.sha256(text.encode('utf-8'))
+    for a in sorted(attachments, key=lambda a: a.name):
+        content.update(a.name.encode('utf-8') + b'\0' + hashlib.sha256(a.read_bytes()).digest())
+    text_digest = content.hexdigest()
+    # The citable text decides when there is any (text_from may change while the file does not);
+    # files without text, and sources stored before text_sha256 existed, compare file bytes.
+    if existing is not None and (
+        current.get('text_sha256') == text_digest if text and current.get('text_sha256')
+        else current.get('sha256') == digest
+    ):
+        return {'id': source_id, 'path': (existing / 'source.md').relative_to(root).as_posix(),
+                'revision': current.get('revision'), 'changed': False}
+    metadata = {'type': 'source', 'id': source_id, 'kind': kind, 'title': title}
+    if date:
+        metadata['date'] = date
+    if authors:
+        metadata['authors'] = authors
+    metadata |= {'revision': revision, 'sha256': digest, 'text_sha256': text_digest, 'original': original}
+    if origin:
+        metadata['origin'] = origin | {'retrieved': datetime.date.today().isoformat()}
+    if attachments:
+        metadata['attachments'] = sorted(names)
+    links = f'[Original](./{original})'
+    links += ''.join(f' · [{n}](./{n})' for n in sorted(names))
+    if origin and origin.get('url'):
+        links += f' · [Live file]({origin["url"]})'
+    body = text or (
+        '_No text could be extracted from this file; consult the original. '
+        'Cite it only for what the original shows._'
+    )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.ingest_', dir=target.parent) as scratch:
+        stage = Path(scratch) / source_id
+        stage.mkdir()
+        shutil.copyfile(file_path, stage / original)
+        for a in attachments:
+            shutil.copyfile(a, stage / a.name)
+        (stage / 'source.md').write_text(
+            '---\n' + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
+            + f'---\n\n# {title}\n\n{links}\n\n{body}\n',
+            encoding='utf-8',
+        )
+        if existing is None:
+            if find_source(sources, source_id) is not None:
+                raise FileExistsError(f'Source ID already exists: {source_id}.')
+            stage.rename(target)
+        else:
+            # Snapshots are immutable: the previous one moves aside, never changes.
+            old = current.get('revision') or str(current.get('sha256', 'previous'))[:12]
+            archive = target / 'revisions' / str(old)
+            if archive.exists():
+                raise FileExistsError(f'Revision {old} of {source_id} is already archived.')
+            archive.mkdir(parents=True)
+            moved = [p for p in target.iterdir() if p.is_file()]
+            for p in moved:
+                p.rename(archive / p.name)
+            for p in stage.iterdir():
+                p.rename(target / p.name)
+    return {'id': source_id, 'path': (target / 'source.md').relative_to(root).as_posix(),
+            'revision': revision, 'changed': True}
+
+
+def citations(root: Path) -> tuple[set[str], dict[str, dict[str, set[str]]]]:
+    """Return cited source IDs and, per ID, the pages that cite each recorded revision."""
     cited = set()
-    for path in (root / 'wiki').rglob('*.md'):
-        if path.resolve().is_relative_to(root / 'wiki'):
-            text = path.read_text(encoding='utf-8')
-            text = re.sub(
-                r'^(`{3,}|~{3,}).*?^\1[^\n]*$', '', text, flags=re.MULTILINE | re.DOTALL
-            )
-            cited.update(re.findall(r'^\[\^([a-z][a-z0-9_]*)\]:', text, re.MULTILINE))
+    revisions: dict[str, dict[str, set[str]]] = {}
+    wiki = root / 'wiki'
+    for path in wiki.rglob('*.md'):
+        if not path.resolve().is_relative_to(wiki.resolve()):
+            continue
+        text = path.read_text(encoding='utf-8')
+        page = path.relative_to(root).as_posix()
+        entries = front_matter(path).get('sources')
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict) or not isinstance(entry.get('id'), str):
+                continue
+            rev = entry.get('revision')
+            found = re.search(r'/revisions/([A-Za-z0-9_-]+)/', str(entry.get('resource', '')))
+            rev = str(rev) if rev is not None else (found[1] if found else None)
+            if rev:
+                revisions.setdefault(entry['id'], {}).setdefault(rev, set()).add(page)
+        text = re.sub(r'^(`{3,}|~{3,}).*?^\1[^\n]*$', '', text, flags=re.MULTILINE | re.DOTALL)
+        cited.update(re.findall(rf'^\[\^({SNAKE})\]:', text, re.MULTILINE))
+    return cited, revisions
+
+
+def status(root: Path, state: str = 'all') -> list[dict[str, object]]:
+    """List complete sources; cited means a wiki footnote, not validation.
+
+    A cited source is stale when a wiki page records a revision other than the current one;
+    the cited snapshot stays readable under revisions/. The cited filter includes stale sources.
+    """
+    if state not in ('uncited', 'cited', 'stale', 'all'):
+        raise ValueError('Unknown citation status.')
+    cited, revisions = citations(root)
+    sources = root / 'sources'
     items = []
-    for entry in sorted((root / 'sources').rglob('*.md')):
+    for entry in sorted(sources.rglob('*.md')):
         if entry.name not in ('source.md', 'metadata.md'):
             continue
         paper = entry.parent
-        if not entry.resolve().is_relative_to(root / 'sources'):
+        if not entry.resolve().is_relative_to(sources) or paper.parent.name == 'revisions':
+            continue
+        if any(part.startswith('.ingest_') for part in paper.relative_to(sources).parts):
             continue
         # Legacy sources remain readable without rewriting research data.
         if entry.name == 'metadata.md' and (paper / 'source.md').exists():
             continue
-        required = ('original.pdf', 'source.md')
+        meta = front_matter(entry) if entry.name == 'source.md' else {}
+        original = meta.get('original', 'original.pdf')
+        required = (str(original), 'source.md')
         if entry.name == 'metadata.md':
             required = ('original.pdf', 'metadata.md', 'raw.md')
         if not all(
-            (paper / name).resolve().is_relative_to(root / 'sources')
+            (paper / name).resolve().is_relative_to(sources)
             and (paper / name).is_file()
             and (paper / name).stat().st_size
             for name in required
         ):
             continue
-        citation = 'cited' if paper.name in cited else 'uncited'
-        if state in ('all', citation):
-            items.append({
+        current = meta.get('revision')
+        stale = sorted({
+            page for rev, pages in revisions.get(paper.name, {}).items()
+            if current is not None and rev != str(current) for page in pages
+        })
+        citation = 'stale' if stale else 'cited' if paper.name in cited else 'uncited'
+        if state == 'all' or state == citation or (state == 'cited' and citation == 'stale'):
+            item = {
                 'id': paper.name,
-                'domain': paper.parent.relative_to(root / 'sources').as_posix(),
+                'domain': paper.parent.relative_to(sources).as_posix(),
                 'path': entry.relative_to(root).as_posix(),
+                'kind': meta.get('kind', 'paper'),
                 'status': citation,
-            })
+            }
+            if current is not None:
+                item['revision'] = str(current)
+            if stale:
+                item['stale_in'] = stale
+            items.append(item)
     return items
 
 
@@ -423,18 +753,29 @@ def main() -> None:
     commands.add_parser('config', help='Show the configuration, recommended servers, and repo state')
     configure = commands.add_parser('setup', help='Apply .agents/podarcis/config.yaml and tools.yaml to the vault')
     configure.add_argument('--stdin', action='store_true', help='Replace the configuration with JSON from stdin first; its env key sets credentials')
-    add = commands.add_parser('ingest', help='Import OpenAlex JSON and a local PDF')
-    add.add_argument('metadata', type=Path, help='Complete OpenAlex get works JSON')
-    add.add_argument('source_id')
-    add.add_argument('domain', help='Relative snake_case folders under sources/')
-    add.add_argument('--pdf-path', required=True, type=Path)
-    listing = commands.add_parser('status', help='List cited or uncited sources')
-    listing.add_argument('--status', choices=('all', 'cited', 'uncited'), default='all')
+    paper = commands.add_parser('ingest', help='Import OpenAlex JSON and a local PDF')
+    paper.add_argument('metadata', type=Path, help='Complete OpenAlex get works JSON')
+    paper.add_argument('source_id')
+    paper.add_argument('domain', help='Relative snake_case folders under sources/')
+    paper.add_argument('--pdf-path', required=True, type=Path)
+    other = commands.add_parser('add', help='Import any file (notes, slides, documents, data, media) as a source')
+    other.add_argument('file', type=Path, help='Local file to snapshot; the original is kept unchanged')
+    other.add_argument('source_id')
+    other.add_argument('domain', help='Relative snake_case folders under sources/')
+    other.add_argument('--kind', help='paper, meeting-notes, slides, document, dataset, media, ...; guessed from the extension')
+    other.add_argument('--title', help='Defaults to the file name')
+    other.add_argument('--date', help='YYYY-MM-DD the content refers to, such as the meeting date')
+    other.add_argument('--author', action='append', dest='authors', help='Repeat per author; omitted by default')
+    other.add_argument('--origin', type=Path, help='JSON describing the external file: provider, id or url, revision, path')
+    other.add_argument('--text-from', type=Path, help='Extract text from this rendering instead of the stored file')
+    other.add_argument('--attach', type=Path, action='append', dest='attachments', help='Extra file stored unchanged beside the original; repeatable')
+    listing = commands.add_parser('status', help='List cited, uncited, or stale sources')
+    listing.add_argument('--status', choices=('all', 'cited', 'uncited', 'stale'), default='all')
     args = parser.parse_args()
     root = Path(args.root).expanduser().resolve()
     if not root.is_dir():
         parser.error(f'No vault directory at {root}.')
-    if args.command in ('ingest', 'status') and not (root / 'sources').is_dir():
+    if args.command in ('ingest', 'add', 'status') and not (root / 'sources').is_dir():
         parser.error(f'No sources/ directory in {root}; run setup first.')
     global SKILL
     try:
@@ -449,6 +790,10 @@ def main() -> None:
             result = setup(root, config, env)
         elif args.command == 'ingest':
             result = ingest(root, args.metadata, args.pdf_path, args.source_id, args.domain)
+        elif args.command == 'add':
+            origin = json.loads(args.origin.read_text(encoding='utf-8')) if args.origin else None
+            result = add(root, args.file, args.source_id, args.domain, args.kind, args.title,
+                         args.date, args.authors, origin, args.text_from, args.attachments)
         else:
             result = status(root, args.status)
     except Exception as error:

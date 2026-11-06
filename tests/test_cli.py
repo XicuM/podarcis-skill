@@ -53,3 +53,20 @@ def test_cli_failure_is_nonzero_and_has_no_json(root, tmp_path):
     assert result.returncode == 1
     assert 'FileNotFoundError' in result.stderr
     assert result.stdout == ''
+
+
+def test_cli_add_imports_a_versioned_file(root, tmp_path):
+    notes = tmp_path / 'notes.md'
+    notes.write_text('# Notes\n\nSite B.\n')
+    origin = tmp_path / 'origin.json'
+    origin.write_text(json.dumps({'provider': 'google-drive', 'id': 'x1', 'revision': 'r1'}))
+    result = subprocess.run(
+        [sys.executable, str(Path(podarcis.__file__)), '--root', str(root), 'add', str(notes),
+         'lab_notes', 'team', '--kind', 'meeting-notes', '--origin', str(origin)],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        'id': 'lab_notes', 'path': 'sources/team/lab_notes/source.md',
+        'revision': 'r1', 'changed': True,
+    }

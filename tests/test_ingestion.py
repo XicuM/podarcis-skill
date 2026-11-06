@@ -22,6 +22,7 @@ def test_real_pdf_ingestion_citation_and_duplicate_guard(root, pdf, metadata):
     assert yaml.safe_load(header) == {
         'type': 'source',
         'id': 'test_paper',
+        'kind': 'paper',
         'title': 'Synthetic fixture',
         'authors': ['Test Author'],
         'year': 2026,
@@ -70,6 +71,7 @@ def test_nested_domains_are_ingested_and_listed(root, pdf, metadata):
         'id': 'deep_paper',
         'domain': domain,
         'path': result['path'],
+        'kind': 'paper',
         'status': 'uncited',
     }]
 

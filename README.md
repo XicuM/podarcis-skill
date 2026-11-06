@@ -1,13 +1,14 @@
 # Podarcis
 
-A portable skill for literature research in a local Markdown vault. OpenAlex supplies discovery and metadata; Podarcis imports papers, tracks wiki citations, and sets up the vault for any agent harness.
+A portable skill for research in a local Markdown vault. OpenAlex supplies discovery and metadata; Podarcis imports papers and team files (meeting notes, slides, documents, spreadsheets, media) as read-only, versioned sources, tracks wiki citations and stale ones, and sets up the vault for any agent harness.
 
 ```text
 vault/
 ├── .agents/           # podarcis/ (config.yaml, tools.yaml, .env) and installed skills
 ├── sources/<optional/domain/folders>/<source_id>/
-│   ├── source.md      # YAML metadata followed by extracted full text
-│   └── original.pdf
+│   ├── source.md      # YAML metadata (kind, revision, origin) followed by extracted text
+│   ├── original.<ext> # the unchanged file: pdf, docx, pptx, xlsx, ...
+│   └── revisions/     # earlier snapshots of versioned sources
 ├── wiki/              # Knowledge pages citing local sources
 └── workspace/         # Deliverables citing wiki pages
 ```

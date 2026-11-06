@@ -1,6 +1,6 @@
 ---
 name: podarcis
-description: Search OpenAlex, import papers into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for literature work in a vault with sources/, wiki/, and workspace/.
+description: Search OpenAlex, import papers and team files (meeting notes, slides, documents, data) into a Podarcis research vault, synthesize cited wiki pages, and create research-informed deliverables. Use for research work in a vault with sources/, wiki/, and workspace/.
 license: AGPL-3.0
 metadata:
   version: 2.2.0
@@ -66,16 +66,31 @@ uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" \
 
 Run each step only after the preceding command succeeds. Use `get works` without `--select` for ingestion: it needs a complete work record, not search output. You can resolve a DOI with `get works https://doi.org/<doi>`. Before ingesting any downloaded or user-supplied PDF, inspect its opening pages and check the title, DOI when present, and publication version against the metadata. OpenAlex locations can point to another journal edition or preprint. Resolve the matching DOI or report an unresolved mismatch; extraction cannot establish document identity. When no PDF can be downloaded, report the failure and use a PDF supplied by the user if available. Never substitute an unrelated document. Remove only the temporary files you created once import succeeds or they are no longer needed.
 
-Ingestion produces `sources/<domain>/<source_id>/source.md` and `original.pdf`. IDs and domain folders use snake_case; domains can be nested. Existing IDs are never replaced, and failed imports leave no partial source. Extraction uses PyMuPDF4LLM with OCR disabled; scanned PDFs need OCR elsewhere. Local ingest and status commands return JSON on stdout and errors on stderr.
+Ingestion produces `sources/<domain>/<source_id>/source.md` and `original.pdf`, with `kind: paper`. IDs and domain folders use snake_case; domains can be nested. Existing IDs are never replaced, and failed imports leave no partial source. Extraction uses PyMuPDF4LLM with OCR disabled; scanned PDFs need OCR elsewhere. Local ingest and status commands return JSON on stdout and errors on stderr.
 
 `OPENALEX_API_KEY` is optional for metadata requests and required for OpenAlex-hosted full text; without it, the downloader tries the work's recorded PDF locations. Set credentials through the process environment; do not put keys in prompts, command arguments, committed files, or output. Do not automatically load unrelated `.env` files. API budgets and endpoint availability are controlled by OpenAlex; surface exhaustion and paid-plan restrictions rather than repeatedly retrying them.
 
 For advanced OpenAlex queries, run `openalex_cli.py --help` and the relevant subcommand's help. `resolve` finds entity IDs before ID-based filters; `filter` supports filtering, sorting, grouping, and paging. Keep discovery results small with `--select` and `--per-page`. Redirect large results to a temporary JSON file and inspect only the fields needed. Do not fabricate IDs, bibliographic fields, evidence, or publication status.
 
+## Other sources
+
+Sources are not only papers: meeting notes, slides, reports, spreadsheets, and media are imported with `add`, which keeps the file unchanged as `original.<ext>` and extracts citable text: `## Page N` for PDFs, `## Slide N` with speaker notes for presentations, the document's own headings for `.docx`, `## Sheet <name>` for workbooks, and a metadata-only entry for images, audio, video, and unknown formats. Export Google Docs, Slides, and Sheets to `.docx`, `.pptx`, and `.xlsx` first.
+
+```bash
+uv run "$podarcis_skill/scripts/podarcis.py" --root "$vault_root" \
+  add notes.docx lab_meeting_2026_10_14 team/meetings --kind meeting-notes --date 2026-10-14
+```
+
+`--kind` defaults from the extension (`document`, `slides`, `dataset`, `media`, `other`); use `paper`, `meeting-notes`, `report`, `protocol`, or any other kebab-case kind that describes the file. `--title` defaults to the file name and `--date` is the date the content refers to. Authors are omitted unless given with `--author`; do not record meeting participants by default. `--origin` takes a JSON file with `provider`, an `id` or `url` identifying the external file, and optionally `revision` and `path`; only then does adding the same source ID again record a new revision, moving the previous snapshot unchanged to `revisions/<revision>/`. Without an origin an existing ID is never replaced. Never edit files under `sources/`, and treat folders mounted read-only (such as a team library) as evidence you can cite but not change.
+
+Treat a non-paper source as evidence of what the document says, not as validated findings: meeting notes record decisions and opinions, slides summarize. Name the kind when it matters, for example "the 14 October lab meeting decided…".
+
+`status --status stale` lists cited sources whose current revision differs from the revision a wiki page recorded, with the pages in `stale_in`. Read the archived snapshot and the current one, then update or confirm each affected claim and its recorded revision.
+
 ## Synthesize and deliver
 
 Read the relevant full-text evidence and check publication status before making scientific claims. OpenAlex results may include preprints; `publication_type: article` does not prove peer review. Record uncertainty and extraction limitations where they matter.
 
-Wiki pages cite local `source.md` files. Workspace deliverables cite wiki pages. Store source text as evidence and put your synthesis in the wiki. Do not place personal identifiers or health information in knowledge pages, source metadata, or external queries.
+Wiki pages cite local `source.md` files, with a heading anchor (`#page-4`, `#slide-7`, `#decisions`) when the claim rests on one part, and record the cited `revision` for versioned sources. Workspace deliverables cite wiki pages. Store source text as evidence and put your synthesis in the wiki. Do not place personal identifiers or health information in knowledge pages, source metadata, or external queries.
 
-`status` means cited or uncited according to wiki footnote definitions; it does not establish source validity, synthesis quality, or peer review. Legacy three-file sources remain readable and listed. Do not migrate existing research data or rewrite its links without user authorization.
+`status` means cited, uncited, or stale according to wiki footnote definitions and recorded revisions; it does not establish source validity, synthesis quality, or peer review. Legacy three-file sources remain readable and listed. Do not migrate existing research data or rewrite its links without user authorization.
