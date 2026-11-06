@@ -1,13 +1,14 @@
 # Podarcis
 
-A portable skill for literature research in a local Markdown vault. OpenAlex supplies discovery and metadata; Podarcis imports papers, tracks wiki citations, and sets up the vault for any agent harness.
+A portable skill for research in a local Markdown vault. OpenAlex supplies discovery and metadata; Podarcis imports papers and team files (meeting notes, slides, documents, spreadsheets, media) as read-only, versioned sources, tracks wiki citations and stale ones, and sets up the vault for any agent harness.
 
 ```text
 vault/
 ├── .agents/           # podarcis.yaml (settings), .env (credentials), installed skills
 ├── sources/<optional/domain/folders>/<source_id>/
-│   ├── source.md      # YAML metadata followed by extracted full text
-│   └── original.pdf
+│   ├── source.md      # YAML metadata (kind, revision, origin) followed by extracted text
+│   ├── original.<ext> # the unchanged file: pdf, docx, pptx, xlsx, ...
+│   └── revisions/     # earlier snapshots of versioned sources
 ├── wiki/              # Knowledge pages citing local sources
 └── workspace/         # Deliverables citing wiki pages
 ```
@@ -19,7 +20,7 @@ Agents follow the [skill](skills/podarcis/SKILL.md) and the [vault contract](ski
 Requires [uv](https://docs.astral.sh/uv/), plus git to sync folders with Git repositories. In the vault folder:
 
 ```bash
-uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.1.0/skills/podarcis/scripts/podarcis.py setup
+uv run https://raw.githubusercontent.com/XicuM/podarcis-skill/v2.2.0/skills/podarcis/scripts/podarcis.py setup
 ```
 
 This installs the skill in `.agents/skills/podarcis` and creates `.agents/podarcis.yaml`, the vault folders, and an empty `.agents/.env`. Use a [sidebar](#sidebars), or edit `.agents/podarcis.yaml` and run setup again with `uv run .agents/skills/podarcis/scripts/podarcis.py setup`:
